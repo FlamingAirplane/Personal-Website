@@ -1,17 +1,11 @@
-// Builds the 3D room out of simple boxes. Everything here is placeholder
-// geometry so the room is walkable before real art exists; Phase 2 swaps in
-// bit-crushed textures and models, keeping the hotspots in room-data.ts.
+// Builds the 3D room out of simple boxes. The furniture is placeholder
+// geometry until real art exists; the walls are screens (wall-screens.ts).
 
 import * as THREE from 'three';
+import { DARK_WORLD, type WorldId } from './environments';
 import { HOTSPOTS, ROOM } from './room-data';
-import {
-  ARCADE_SIZE,
-  PC_SIZE,
-  SKY_SIZE,
-  paintArcade,
-  paintComputer,
-  paintSky,
-} from './screens';
+import { ARCADE_SIZE, PC_SIZE, paintArcade, paintComputer } from './screens';
+import { createWallScreens } from './wall-screens';
 
 export interface Room {
   scene: THREE.Scene;
@@ -19,11 +13,15 @@ export interface Room {
   floor: THREE.Mesh;
   /** Invisible boxes around each hotspot; userData.hotspotId names it. */
   hitVolumes: THREE.Mesh[];
-  setLit(lit: boolean): void;
+  /**
+   * Lights off: the walls show the dark nebula. Lights on: they show `world`.
+   * `instant` skips the glitchy switch-over.
+   */
+  setState(lit: boolean, world: WorldId, instant?: boolean): void;
   /** Outline one hotspot (or none). */
   setHighlight(id: string | null): void;
-  /** Redraw the moving screens. `t` is in seconds. */
-  update(t: number): void;
+  /** Advance everything that moves. `t` and `dt` are in seconds. */
+  update(t: number, dt: number, reducedMotion: boolean): void;
   dispose(): void;
 }
 
@@ -65,6 +63,25 @@ export function buildRoom(): Room {
     return mesh;
   };
 
+  /** A square bar running from one point to another. */
+  const beam = (material: THREE.Material, thickness: number, from: THREE.Vector3, to: THREE.Vector3) => {
+    const mesh = box(material, thickness, thickness, from.distanceTo(to), 0, 0, 0);
+    mesh.position.copy(from).add(to).multiplyScalar(0.5);
+    mesh.lookAt(to);
+    return mesh;
+  };
+
+  /** A cylinder lying along the east-west (x) axis, centred at (x, y, z). */
+  const rod = (material: THREE.Material, radius: number, length: number, x: number, y: number, z: number) => {
+    const geometry = new THREE.CylinderGeometry(radius, radius, length, 10);
+    disposables.push(geometry);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.rotation.z = Math.PI / 2;
+    mesh.position.set(x, y, z);
+    scene.add(mesh);
+    return mesh;
+  };
+
   /** A flat screen showing a small 2D drawing that is redrawn over time. */
   const screens: { ctx: CanvasRenderingContext2D; texture: THREE.CanvasTexture; paint: (ctx: CanvasRenderingContext2D, t: number) => void }[] = [];
   const screen = (
@@ -100,49 +117,32 @@ export function buildRoom(): Room {
 
   /* ------------------------------ the shell ------------------------------ */
 
-  const wallMat = lambert('#c8d4a8');
   const trimMat = lambert('#4d2f22');
   const woodMat = lambert('#7a4a30');
-  const darkWood = lambert('#2a1a14');
+  const bezelMat = lambert('#0b0d18');
 
   const floor = box(lambert('#8a5636'), ROOM.width, 0.1, ROOM.depth, 0, -0.05, 0);
   // Floorboard seams.
   for (let x = -HALF_W + 0.5; x < HALF_W; x += 0.5) {
     box(trimMat, 0.02, 0.004, ROOM.depth, x, 0.002, 0);
   }
-  box(lambert('#e6e9cc'), ROOM.width, 0.1, ROOM.depth, 0, ROOM.height + 0.05, 0); // ceiling
+  box(lambert('#3a4048'), ROOM.width, 0.1, ROOM.depth, 0, ROOM.height + 0.05, 0); // ceiling
 
-  box(wallMat, ROOM.width, ROOM.height, 0.1, 0, ROOM.height / 2, -HALF_D - 0.05); // north
-  box(wallMat, ROOM.width, ROOM.height, 0.1, 0, ROOM.height / 2, HALF_D + 0.05); // south
-  box(wallMat, 0.1, ROOM.height, ROOM.depth, HALF_W + 0.05, ROOM.height / 2, 0); // east
-  box(wallMat, 0.1, ROOM.height, ROOM.depth, -HALF_W - 0.05, ROOM.height / 2, 0); // west
+  // The four walls are screens (see wall-screens.ts).
+  const walls = createWallScreens(DARK_WORLD);
+  scene.add(walls.group, walls.light);
 
-  // Skirting boards.
-  box(trimMat, ROOM.width, 0.12, 0.03, 0, 0.06, -HALF_D + 0.015);
-  box(trimMat, ROOM.width, 0.12, 0.03, 0, 0.06, HALF_D - 0.015);
-  box(trimMat, 0.03, 0.12, ROOM.depth, HALF_W - 0.015, 0.06, 0);
-  box(trimMat, 0.03, 0.12, ROOM.depth, -HALF_W + 0.015, 0.06, 0);
+  // Bezels where the screens meet the floor and ceiling.
+  for (const y of [0.04, ROOM.height - 0.04]) {
+    box(bezelMat, ROOM.width, 0.08, 0.03, 0, y, -HALF_D + 0.015);
+    box(bezelMat, ROOM.width, 0.08, 0.03, 0, y, HALF_D - 0.015);
+    box(bezelMat, 0.03, 0.08, ROOM.depth, HALF_W - 0.015, y, 0);
+    box(bezelMat, 0.03, 0.08, ROOM.depth, -HALF_W + 0.015, y, 0);
+  }
 
-  // Ceiling lamp.
-  const lampOn = glow('#f0d9a0');
-  const lampOff = lambert('#a4adb8');
-  const lamp = box(lampOff, 0.5, 0.06, 0.5, 0, ROOM.height - 0.03, 0);
+  /* ----------------------------- north: switch ---------------------------- */
 
-  /* ------------------------- north: window, switch ------------------------ */
-
-  const WIN_W = 2.8;
-  const WIN_H = 1.5;
-  const WIN_Y = 1.7;
   const northZ = -HALF_D;
-  screen(SKY_SIZE, paintSky, WIN_W, WIN_H, 0, WIN_Y, northZ + 0.02, 0);
-  box(trimMat, WIN_W + 0.2, 0.1, 0.12, 0, WIN_Y + WIN_H / 2 + 0.05, northZ + 0.06);
-  box(trimMat, WIN_W + 0.2, 0.1, 0.12, 0, WIN_Y - WIN_H / 2 - 0.05, northZ + 0.06);
-  box(trimMat, 0.1, WIN_H, 0.12, -WIN_W / 2 - 0.05, WIN_Y, northZ + 0.06);
-  box(trimMat, 0.1, WIN_H, 0.12, WIN_W / 2 + 0.05, WIN_Y, northZ + 0.06);
-  box(darkWood, 0.05, WIN_H, 0.06, 0, WIN_Y, northZ + 0.05);
-  box(darkWood, WIN_W, 0.05, 0.06, 0, WIN_Y, northZ + 0.05);
-  box(woodMat, WIN_W + 0.4, 0.05, 0.22, 0, WIN_Y - WIN_H / 2 - 0.12, northZ + 0.11);
-
   const SWITCH_X = 2.3;
   const SWITCH_Y = 1.35;
   box(lambert('#f3f7e4'), 0.12, 0.18, 0.02, SWITCH_X, SWITCH_Y, northZ + 0.01);
@@ -161,11 +161,86 @@ export function buildRoom(): Room {
 
   const greyDark = lambert('#3a4048');
   const greyMid = lambert('#6b7480');
-  box(greyMid, 0.22, 0.03, 0.34, eastX - 0.34, 0.795, 0); // monitor base
-  box(greyDark, 0.05, 0.14, 0.08, eastX - 0.3, 0.87, 0); // neck
-  box(greyDark, 0.06, 0.52, 0.86, eastX - 0.32, 1.2, 0); // monitor
-  screen(PC_SIZE, paintComputer, 0.78, 0.44, eastX - 0.352, 1.2, 0, -Math.PI / 2);
-  box(lambert('#a4adb8'), 0.16, 0.02, 0.46, eastX - 0.66, 0.79, 0.05); // keyboard
+  const black = lambert('#0b0d18');
+  const DESK_TOP = 0.78;
+
+  // 27-inch monitor (16:9, 598 x 336 mm picture).
+  const MON_X = eastX - 0.3;
+  const MON_Y = DESK_TOP + 0.31;
+  box(greyDark, 0.2, 0.02, 0.26, MON_X + 0.02, DESK_TOP + 0.01, 0); // base
+  box(greyDark, 0.04, 0.16, 0.06, MON_X + 0.03, DESK_TOP + 0.09, 0); // neck
+  box(black, 0.04, 0.365, 0.615, MON_X, MON_Y, 0);
+  screen(PC_SIZE, paintComputer, 0.598, 0.336, MON_X - 0.021, MON_Y, 0, -Math.PI / 2);
+  box(lambert('#a4adb8'), 0.14, 0.02, 0.44, eastX - 0.66, DESK_TOP + 0.01, 0.02); // keyboard
+  box(greyDark, 0.1, 0.03, 0.06, eastX - 0.66, DESK_TOP + 0.015, 0.36); // mouse
+
+  // PC: a compact micro-ATX tower with black mesh panels and a wood strip
+  // across the front, after the Lian Li A3-mATX (443 x 194 x 322 mm).
+  const meshCanvas = document.createElement('canvas');
+  meshCanvas.width = 4;
+  meshCanvas.height = 4;
+  const meshCtx = meshCanvas.getContext('2d')!;
+  meshCtx.fillStyle = '#0b0d18';
+  meshCtx.fillRect(0, 0, 4, 4);
+  meshCtx.fillStyle = '#3a4048';
+  meshCtx.fillRect(0, 0, 2, 2);
+  meshCtx.fillRect(2, 2, 2, 2);
+  const meshTexture = new THREE.CanvasTexture(meshCanvas);
+  meshTexture.colorSpace = THREE.SRGBColorSpace;
+  meshTexture.wrapS = meshTexture.wrapT = THREE.RepeatWrapping;
+  meshTexture.magFilter = THREE.NearestFilter;
+  meshTexture.repeat.set(14, 10);
+  const meshMat = new THREE.MeshLambertMaterial({ map: meshTexture });
+  disposables.push(meshTexture, meshMat);
+
+  const CASE = { l: 0.443, h: 0.322, w: 0.194 };
+  const CASE_X = eastX - 0.4;
+  const CASE_Z = 0.74;
+  const CASE_Y = DESK_TOP + 0.014 + CASE.h / 2;
+  const caseFront = CASE_X - CASE.l / 2;
+  box(black, CASE.l, CASE.h, CASE.w, CASE_X, CASE_Y, CASE_Z); // frame
+  box(meshMat, 0.006, CASE.h - 0.09, CASE.w - 0.02, caseFront - 0.002, CASE_Y + 0.035, CASE_Z); // front mesh
+  box(lambert('#a8744a'), 0.012, 0.06, CASE.w, caseFront - 0.005, CASE_Y - CASE.h / 2 + 0.045, CASE_Z); // wood strip
+  box(meshMat, CASE.l - 0.03, CASE.h - 0.03, 0.006, CASE_X, CASE_Y, CASE_Z - CASE.w / 2 - 0.002); // side
+  box(meshMat, CASE.l - 0.03, CASE.h - 0.03, 0.006, CASE_X, CASE_Y, CASE_Z + CASE.w / 2 + 0.002); // side
+  box(meshMat, CASE.l - 0.03, 0.006, CASE.w - 0.02, CASE_X, CASE_Y + CASE.h / 2 + 0.002, CASE_Z); // top
+  box(glow('#f3f7e4'), 0.012, 0.006, 0.012, caseFront + 0.03, CASE_Y + CASE.h / 2 + 0.006, CASE_Z + 0.06); // power light
+  for (const dx of [-0.18, 0.18]) {
+    for (const dz of [-0.07, 0.07]) {
+      box(greyDark, 0.03, 0.014, 0.03, CASE_X + dx, DESK_TOP + 0.007, CASE_Z + dz); // feet
+    }
+  }
+
+  // Audio interface: a small red box with a black face, two gain knobs with
+  // green rings and one large volume knob (Focusrite Scarlett 2i2, 3rd Gen).
+  const IF_X = eastX - 0.62;
+  const IF_Z = -0.52;
+  const IF_Y = DESK_TOP + 0.024;
+  const ifFront = IF_X - 0.05;
+  box(lambert('#b8405a'), 0.099, 0.0475, 0.175, IF_X, IF_Y, IF_Z);
+  box(black, 0.004, 0.044, 0.171, ifFront - 0.002, IF_Y, IF_Z);
+  for (const dz of [-0.05, -0.012]) {
+    box(glow('#94a348'), 0.003, 0.026, 0.026, ifFront - 0.005, IF_Y, IF_Z + dz); // gain ring
+    box(greyDark, 0.012, 0.016, 0.016, ifFront - 0.01, IF_Y, IF_Z + dz); // gain knob
+  }
+  box(lambert('#a4adb8'), 0.014, 0.032, 0.032, ifFront - 0.01, IF_Y, IF_Z + 0.052); // volume knob
+
+  // Boom arm clamped to the back of the desk, holding a broadcast
+  // microphone with a foam windscreen (Shure SM7B).
+  const armBase = new THREE.Vector3(eastX - 0.12, DESK_TOP + 0.03, -0.96);
+  const armElbow = new THREE.Vector3(eastX - 0.26, DESK_TOP + 0.6, -0.9);
+  const armTip = new THREE.Vector3(eastX - 0.62, DESK_TOP + 0.5, -0.46);
+  box(greyDark, 0.06, 0.07, 0.06, armBase.x, DESK_TOP + 0.02, armBase.z); // clamp
+  beam(black, 0.025, armBase, armElbow);
+  beam(black, 0.025, armElbow, armTip);
+  box(greyDark, 0.04, 0.04, 0.04, armElbow.x, armElbow.y, armElbow.z); // elbow joint
+  const MIC_Y = armTip.y - 0.1;
+  box(greyDark, 0.016, 0.1, 0.016, armTip.x, armTip.y - 0.05, armTip.z); // drop post
+  box(greyDark, 0.035, 0.012, 0.09, armTip.x, MIC_Y + 0.04, armTip.z); // yoke top
+  box(greyDark, 0.035, 0.07, 0.006, armTip.x, MIC_Y + 0.006, armTip.z - 0.042); // yoke sides
+  box(greyDark, 0.035, 0.07, 0.006, armTip.x, MIC_Y + 0.006, armTip.z + 0.042);
+  rod(greyDark, 0.03, 0.11, armTip.x + 0.01, MIC_Y, armTip.z); // mic body
+  rod(lambert('#1a1e10'), 0.037, 0.1, armTip.x - 0.095, MIC_Y, armTip.z); // windscreen
 
   const SHELF_Z = -2.0;
   const SHELF_Y = 1.72;
@@ -244,18 +319,15 @@ export function buildRoom(): Room {
 
   /* -------------------------------- lights ------------------------------- */
 
-  const ambient = new THREE.AmbientLight('#ffffff', 1);
-  const ceilingLight = new THREE.PointLight('#fff3e0', 0, 0, 1.6);
-  ceilingLight.position.set(0, ROOM.height - 0.4, 0);
-  const windowLight = new THREE.PointLight('#8a6fd4', 0, 0, 1.6);
-  windowLight.position.set(0, WIN_Y, northZ + 0.7);
+  // Most of the room's light comes from the wall screens (walls.light).
+  const ambient = new THREE.AmbientLight('#ffffff', 0.32);
   const pcLight = new THREE.PointLight('#3a8fa0', 0, 0, 1.8);
   pcLight.position.set(eastX - 0.9, 1.25, 0);
   const arcadeLight = new THREE.PointLight('#5a8fc0', 0, 0, 1.8);
   arcadeLight.position.set(ARC_X, 1.35, southZ - 1.2);
   const doorLight = new THREE.PointLight('#f0d9a0', 0, 0, 2);
   doorLight.position.set(DOOR_X, 0.12, southZ - 0.35);
-  scene.add(ambient, ceilingLight, windowLight, pcLight, arcadeLight, doorLight);
+  scene.add(ambient, pcLight, arcadeLight, doorLight);
 
   const fog = new THREE.FogExp2('#0b0d24', 0);
   scene.fog = fog;
@@ -289,42 +361,45 @@ export function buildRoom(): Room {
 
   /* -------------------------------- state -------------------------------- */
 
-  const setLit = (lit: boolean) => {
-    ambient.color.set(lit ? '#ffffff' : '#4a4aa0');
-    ambient.intensity = lit ? 1.9 : 0.45;
-    ceilingLight.intensity = lit ? 4 : 0;
-    windowLight.intensity = lit ? 0.6 : 4.5;
-    pcLight.intensity = lit ? 0.2 : 1.6;
-    arcadeLight.intensity = lit ? 0.2 : 1.4;
+  const setState = (lit: boolean, world: WorldId, instant = false) => {
+    walls.show(lit ? world : DARK_WORLD, instant);
+    pcLight.intensity = lit ? 0.3 : 1.4;
+    arcadeLight.intensity = lit ? 0.3 : 1.2;
     doorLight.intensity = lit ? 0 : 0.5;
-    fog.density = lit ? 0 : 0.13;
-    lamp.material = lit ? lampOn : lampOff;
+    fog.density = lit ? 0 : 0.06;
     cinemaMat.emissiveIntensity = lit ? 0 : 0.12;
     switchNub.position.y = SWITCH_Y + (lit ? 0.03 : -0.03);
     switchLed.visible = !lit;
     doorGlow.visible = !lit;
     headphoneLed.visible = !lit;
   };
-  setLit(false);
+  setState(false, DARK_WORLD, true);
+
+  let lastScreens = -1;
 
   return {
     scene,
     floor,
     hitVolumes,
-    setLit,
+    setState,
     setHighlight(id) {
       outlines.forEach((outline, key) => {
         outline.visible = key === id;
       });
     },
-    update(t) {
+    update(t, dt, reducedMotion) {
+      walls.update(t, dt, reducedMotion);
+      // The small screens only need redrawing a few times a second.
+      if (t - lastScreens < 0.12) return;
+      lastScreens = t;
       for (const s of screens) {
-        s.paint(s.ctx, t);
+        s.paint(s.ctx, reducedMotion ? 0 : t);
         s.texture.needsUpdate = true;
       }
     },
     dispose() {
       disposables.forEach((d) => d.dispose());
+      walls.dispose();
     },
   };
 }

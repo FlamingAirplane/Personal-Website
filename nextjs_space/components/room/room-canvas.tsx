@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { buildRoom } from '@/lib/room/build-room';
 import { createCrushPass } from '@/lib/room/crush-pass';
+import { DEFAULT_WORLD, type WorldId } from '@/lib/room/environments';
 import { HOTSPOTS, OBSTACLES, ROOM, START, type Hotspot } from '@/lib/room/room-data';
 import { rememberSiteMode } from '@/lib/site-mode';
 import { withBase } from '@/lib/site';
@@ -21,7 +22,6 @@ const KEY_TURN_SPEED = 1.9; // radians per second
 const DRAG_LOOK = 0.0045; // radians per pixel dragged
 const PITCH_LIMIT = 1.0;
 const BODY_RADIUS = 0.3;
-const SCREEN_FRAME_MS = 120; // how often the glowing screens redraw
 
 /** Where the walk is headed, and what happens on arrival. */
 interface Walk {
@@ -86,6 +86,8 @@ export function RoomCanvas() {
     let walk: Walk | null = null;
     let walkPhase = 0;
     let lit = false;
+    // The place on the walls when the lights are on: whatever was last inspected.
+    let world: WorldId = DEFAULT_WORLD;
     let hoverId: string | null = null;
     const keys = new Set<string>();
 
@@ -94,7 +96,7 @@ export function RoomCanvas() {
     } catch {
       /* storage unavailable: start dark */
     }
-    room.setLit(lit);
+    room.setState(lit, world, true);
 
     /* ------------------------------- sizing ------------------------------ */
 
@@ -162,9 +164,13 @@ export function RoomCanvas() {
 
     const act = (spot: Hotspot) => {
       const action = spot.action;
+      if (spot.world && spot.world !== world) {
+        world = spot.world;
+        room.setState(lit, world);
+      }
       if (action.type === 'toggle-light') {
         lit = !lit;
-        room.setLit(lit);
+        room.setState(lit, world);
         setMessage(lit ? 'Lights on.' : 'Lights off.');
         try {
           window.localStorage.setItem(LIT_KEY, lit ? '1' : '0');
@@ -301,7 +307,6 @@ export function RoomCanvas() {
 
     let raf = 0;
     let last = performance.now();
-    let lastScreens = 0;
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
@@ -367,10 +372,7 @@ export function RoomCanvas() {
       camera.position.set(pose.x, ROOM.eyeHeight + bob, pose.z);
       camera.rotation.set(pose.pitch, pose.yaw, 0);
 
-      if (now - lastScreens > SCREEN_FRAME_MS) {
-        lastScreens = now;
-        room.update(reducedMotion ? 0 : now / 1000);
-      }
+      room.update(now / 1000, dt, reducedMotion);
 
       renderer.setRenderTarget(target);
       renderer.render(room.scene, camera);

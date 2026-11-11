@@ -4,6 +4,8 @@
 //
 // To add an object: add a hotspot here, then build it in lib/room/build-room.ts.
 
+import type { WorldId } from './environments';
+
 export const ROOM = {
   width: 7, // x: -3.5 .. 3.5
   depth: 6, // z: -3 .. 3
@@ -35,17 +37,14 @@ export interface Hotspot {
   /** Where you stand (x, z) when you walk up to it. */
   stand: [number, number];
   action: HotspotAction;
+  /**
+   * The place the wall screens switch to when you inspect this.
+   * Placeholder pairings until each project brings its own.
+   */
+  world?: WorldId;
 }
 
 export const HOTSPOTS: Hotspot[] = [
-  {
-    id: 'window',
-    label: 'Window',
-    center: [0, 1.7, -2.92],
-    size: [3.0, 1.7, 0.3],
-    stand: [0, -0.7],
-    action: { type: 'inspect', line: 'Whatever is out there keeps the same hours you do.' },
-  },
   {
     id: 'light-switch',
     label: 'Light switch',
@@ -57,10 +56,11 @@ export const HOTSPOTS: Hotspot[] = [
   {
     id: 'computer',
     label: 'Computer',
-    center: [3.1, 1.1, 0],
-    size: [0.5, 0.9, 1.3],
+    center: [3.2, 1.08, 0],
+    size: [0.3, 0.62, 0.75],
     stand: [1.7, 0],
     action: { type: 'inspect', line: 'The computer. The bigger games will live on its desktop.' },
+    world: 'forest',
   },
   {
     id: 'shelf',
@@ -69,6 +69,7 @@ export const HOTSPOTS: Hotspot[] = [
     size: [0.35, 0.6, 1.3],
     stand: [2.0, -2.0],
     action: { type: 'inspect', line: "A shelf for what I'm reading, hearing and building." },
+    world: 'city',
   },
   {
     id: 'door',
@@ -85,6 +86,7 @@ export const HOTSPOTS: Hotspot[] = [
     size: [0.9, 1.85, 0.85],
     stand: [0.6, 1.0],
     action: { type: 'inspect', line: 'The arcade machine. Browser games will run right here.' },
+    world: 'sunset',
   },
   {
     id: 'toolbox',
@@ -93,6 +95,7 @@ export const HOTSPOTS: Hotspot[] = [
     size: [0.75, 0.5, 0.45],
     stand: [2.3, 1.2],
     action: { type: 'inspect', line: 'The toolbox. My tools go in here.' },
+    world: 'forest',
   },
   {
     id: 'cinema',
@@ -101,6 +104,7 @@ export const HOTSPOTS: Hotspot[] = [
     size: [0.25, 1.8, 3.4],
     stand: [-0.8, 0],
     action: { type: 'inspect', line: 'The screen is blank. It wants headphones first.' },
+    world: 'sunset',
   },
   {
     id: 'headphones',
@@ -109,6 +113,7 @@ export const HOTSPOTS: Hotspot[] = [
     size: [0.3, 0.55, 0.5],
     stand: [-2.3, 2.1],
     action: { type: 'inspect', line: 'Headphones. Putting them on will start the show.' },
+    world: 'city',
   },
 ];
 
