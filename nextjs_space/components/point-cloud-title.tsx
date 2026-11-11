@@ -50,25 +50,6 @@ export function PointCloudTitle() {
     let frameId = 0;
     let destroyed = false;
 
-    // Fetch settings from API
-    fetch('/api/site-settings')
-      .then(r => r.json())
-      .then(data => {
-        if (data?.success && data?.settings) {
-          const s = data.settings;
-          settingsRef.current = {
-            mouseRadius: s.particleMouseRadius ?? 70,
-            pushForce: s.particlePushForce ?? 8,
-            returnSpeed: (s.particleReturnSpeed ?? 6) / 100,
-            friction: (s.particleFriction ?? 85) / 100,
-            gap: s.particleGap ?? 3,
-            titleText: s.titleText ?? 'Adine.',
-          };
-          buildParticles();
-        }
-      })
-      .catch(() => {});
-
     function buildParticles() {
       const displayW = canvas!.clientWidth;
       const displayH = canvas!.clientHeight;

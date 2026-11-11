@@ -1,5 +1,7 @@
 'use client';
 
+import { withBase } from '@/lib/site';
+
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import { ChevronDown } from 'lucide-react';
@@ -17,7 +19,7 @@ export function HeroSection({ profile }: Props) {
       <div className="absolute inset-0">
         <div className="relative w-full h-full">
           <Image
-            src={safeProfile.heroBgUrl || '/images/hero-bg.jpeg'}
+            src={safeProfile.heroBgUrl || withBase('/images/hero-bg.jpeg')}
             alt="Hero background - scenic landscape"
             fill
             className="object-cover opacity-30"

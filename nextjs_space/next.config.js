@@ -1,13 +1,20 @@
-const path = require('path');
+// The site is exported as plain static files for GitHub Pages.
+//
+// GitHub Pages serves this repo at https://flamingairplane.github.io/Personal-Website,
+// so the published build lives under that sub-path. To move to a custom domain
+// later, build with NEXT_PUBLIC_BASE_PATH="" (see .github/workflows/deploy-pages.yml).
+
+const basePath =
+  process.env.NEXT_PUBLIC_BASE_PATH ??
+  (process.env.NODE_ENV === 'production' ? '/Personal-Website' : '');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  distDir: process.env.NEXT_DIST_DIR || '.next',
-  output: process.env.NEXT_OUTPUT_MODE,
+  output: 'export',
+  basePath,
+  trailingSlash: true,
+  env: { NEXT_PUBLIC_BASE_PATH: basePath },
   productionBrowserSourceMaps: false,
-  experimental: {
-    outputFileTracingRoot: path.join(__dirname, '../'),
-  },
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -15,13 +22,6 @@ const nextConfig = {
     ignoreBuildErrors: false,
   },
   images: { unoptimized: true },
-  webpack: (config, { isServer }) => {
-    if (!isServer) {
-      config.output.filename = 'static/chunks/[name]-[contenthash:8].js';
-      config.output.chunkFilename = 'static/chunks/[contenthash:16].js';
-    }
-    return config;
-  },
 };
 
 module.exports = nextConfig;
