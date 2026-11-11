@@ -1,154 +1,400 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { bitCrush } from '@/lib/room/palette';
-import { paintView } from '@/lib/room/paint';
-import {
-  ROOM_H,
-  ROOM_VIEWS,
-  ROOM_W,
-  START_VIEW,
-  type Hotspot,
-  type ViewId,
-} from '@/lib/room/room-data';
+import { useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
+import { buildRoom } from '@/lib/room/build-room';
+import { createCrushPass } from '@/lib/room/crush-pass';
+import { HOTSPOTS, OBSTACLES, ROOM, START, type Hotspot } from '@/lib/room/room-data';
 import { rememberSiteMode } from '@/lib/site-mode';
 import { withBase } from '@/lib/site';
 
 const LIT_KEY = 'room-lit';
-const TURN_MS = 280;
-const IDLE_FRAME_MS = 80; // ~12fps when nothing is sliding: cheap, and it suits the look
 const MESSAGE_MS = 4500;
 
-interface Turn {
-  from: ViewId;
-  to: ViewId;
-  /** 1 = turning right, -1 = turning left. */
-  dir: 1 | -1;
-  start: number;
+// The room is rendered this many pixels along the screen's short side and
+// scaled up with hard edges. This is the bit-crushed look.
+const SHORT_SIDE = 200;
+const LONG_SIDE_MAX = 480;
+
+const WALK_SPEED = 2.6; // metres per second
+const KEY_TURN_SPEED = 1.9; // radians per second
+const DRAG_LOOK = 0.0045; // radians per pixel dragged
+const PITCH_LIMIT = 1.0;
+const BODY_RADIUS = 0.3;
+const SCREEN_FRAME_MS = 120; // how often the glowing screens redraw
+
+/** Where the walk is headed, and what happens on arrival. */
+interface Walk {
+  x: number;
+  z: number;
+  yaw?: number;
+  pitch?: number;
+  onArrive?: () => void;
+  stuckFrames: number;
+}
+
+/** Controls handed from the 3D loop to the React buttons. */
+interface RoomApi {
+  visit(spot: Hotspot): void;
+  highlight(id: string | null): void;
+}
+
+function shortestAngle(from: number, to: number) {
+  let d = (to - from) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
 }
 
 export function RoomCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const apiRef = useRef<RoomApi | null>(null);
 
-  const [viewId, setViewId] = useState<ViewId>(START_VIEW);
-  const [lit, setLit] = useState(false);
-  const [turning, setTurning] = useState(false);
-  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [showHint, setShowHint] = useState(true);
+  const [failed, setFailed] = useState(false);
 
-  // What the render loop reads. Kept in a ref so the loop never restarts.
-  const live = useRef({
-    viewId: START_VIEW as ViewId,
-    lit: false,
-    hoverId: null as string | null,
-    turn: null as Turn | null,
-    reducedMotion: false,
-  });
-  live.current.viewId = viewId;
-  live.current.lit = lit;
-  live.current.hoverId = hoverId;
-
-  const view = ROOM_VIEWS[viewId];
-
-  // Restore the light switch from the last visit.
   useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    let renderer: THREE.WebGLRenderer;
     try {
-      if (window.localStorage.getItem(LIT_KEY) === '1') setLit(true);
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' });
+    } catch {
+      setFailed(true);
+      return;
+    }
+    renderer.setPixelRatio(1);
+
+    const room = buildRoom();
+    const crush = createCrushPass();
+    const target = new THREE.WebGLRenderTarget(SHORT_SIDE, SHORT_SIDE, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    });
+    crush.setSource(target.texture);
+
+    const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 30);
+    camera.rotation.order = 'YXZ';
+
+    const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    // Where you are and where you are looking.
+    const pose = { x: START.x, z: START.z, yaw: START.yaw, pitch: START.pitch };
+    let walk: Walk | null = null;
+    let walkPhase = 0;
+    let lit = false;
+    let hoverId: string | null = null;
+    const keys = new Set<string>();
+
+    try {
+      lit = window.localStorage.getItem(LIT_KEY) === '1';
     } catch {
       /* storage unavailable: start dark */
     }
-  }, []);
+    room.setLit(lit);
 
-  // The render loop: paint at low resolution, bit-crush, show.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
+    /* ------------------------------- sizing ------------------------------ */
 
-    const buffer = document.createElement('canvas');
-    buffer.width = ROOM_W;
-    buffer.height = ROOM_H;
-    const bctx = buffer.getContext('2d', { willReadFrequently: true });
-    if (!bctx) return;
-    bctx.imageSmoothingEnabled = false;
-
-    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const syncMotion = () => {
-      live.current.reducedMotion = motionQuery.matches;
+    const resize = () => {
+      const cw = canvas.clientWidth || 1;
+      const ch = canvas.clientHeight || 1;
+      const aspect = cw / ch;
+      const w = aspect >= 1 ? Math.min(LONG_SIDE_MAX, Math.round(SHORT_SIDE * aspect)) : SHORT_SIDE;
+      const h = aspect >= 1 ? SHORT_SIDE : Math.min(LONG_SIDE_MAX, Math.round(SHORT_SIDE / aspect));
+      renderer.setSize(w, h, false);
+      target.setSize(w, h);
+      camera.aspect = aspect;
+      camera.fov = aspect >= 1 ? 62 : 78; // wider on a phone held upright
+      camera.updateProjectionMatrix();
     };
-    syncMotion();
-    motionQuery.addEventListener('change', syncMotion);
+    resize();
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(canvas);
+
+    /* ------------------------------ movement ----------------------------- */
+
+    const keepInRoom = () => {
+      const maxX = ROOM.width / 2 - ROOM.wallMargin;
+      const maxZ = ROOM.depth / 2 - ROOM.wallMargin;
+      pose.x = Math.max(-maxX, Math.min(maxX, pose.x));
+      pose.z = Math.max(-maxZ, Math.min(maxZ, pose.z));
+      // Slide around furniture: push out along the shallowest side.
+      for (const [x0, x1, z0, z1] of OBSTACLES) {
+        const ax0 = x0 - BODY_RADIUS;
+        const ax1 = x1 + BODY_RADIUS;
+        const az0 = z0 - BODY_RADIUS;
+        const az1 = z1 + BODY_RADIUS;
+        if (pose.x <= ax0 || pose.x >= ax1 || pose.z <= az0 || pose.z >= az1) continue;
+        const pushes: [number, () => void][] = [
+          [pose.x - ax0, () => (pose.x = ax0)],
+          [ax1 - pose.x, () => (pose.x = ax1)],
+          [pose.z - az0, () => (pose.z = az0)],
+          [az1 - pose.z, () => (pose.z = az1)],
+        ];
+        pushes.sort((a, b) => a[0] - b[0]);
+        pushes[0][1]();
+      }
+    };
+
+    const startWalk = (next: Omit<Walk, 'stuckFrames'>) => {
+      setShowHint(false);
+      if (reducedMotionQuery.matches) {
+        // No gliding: arrive at once.
+        pose.x = next.x;
+        pose.z = next.z;
+        if (next.yaw !== undefined) pose.yaw = next.yaw;
+        if (next.pitch !== undefined) pose.pitch = next.pitch;
+        keepInRoom();
+        walk = null;
+        next.onArrive?.();
+        return;
+      }
+      walk = { ...next, stuckFrames: 0 };
+    };
+
+    const leave = () => {
+      rememberSiteMode('standard');
+      window.location.assign(withBase('/'));
+    };
+
+    const act = (spot: Hotspot) => {
+      const action = spot.action;
+      if (action.type === 'toggle-light') {
+        lit = !lit;
+        room.setLit(lit);
+        setMessage(lit ? 'Lights on.' : 'Lights off.');
+        try {
+          window.localStorage.setItem(LIT_KEY, lit ? '1' : '0');
+        } catch {
+          /* not remembered, still works */
+        }
+      } else if (action.type === 'exit') {
+        leave();
+      } else {
+        setMessage(action.line);
+      }
+    };
+
+    /** Walk up to an object, turn to face it, then use it. */
+    const visit = (spot: Hotspot) => {
+      const [sx, sz] = spot.stand;
+      const dx = spot.center[0] - sx;
+      const dy = spot.center[1] - ROOM.eyeHeight;
+      const dz = spot.center[2] - sz;
+      setMessage(null);
+      startWalk({
+        x: sx,
+        z: sz,
+        yaw: Math.atan2(-dx, -dz),
+        pitch: Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, Math.atan2(dy, Math.hypot(dx, dz)))),
+        onArrive: () => act(spot),
+      });
+    };
+
+    const highlight = (id: string | null) => {
+      if (id === hoverId) return;
+      hoverId = id;
+      room.setHighlight(id);
+      setHoverLabel(id ? (HOTSPOTS.find((h) => h.id === id)?.label ?? null) : null);
+    };
+
+    apiRef.current = { visit, highlight };
+
+    /* ------------------------------ pointing ----------------------------- */
+
+    const raycaster = new THREE.Raycaster();
+    const pointerNdc = new THREE.Vector2();
+    const pickTargets: THREE.Object3D[] = [...room.hitVolumes, room.floor];
+
+    const pick = (clientX: number, clientY: number) => {
+      const bounds = canvas.getBoundingClientRect();
+      pointerNdc.set(
+        ((clientX - bounds.left) / bounds.width) * 2 - 1,
+        -((clientY - bounds.top) / bounds.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(pointerNdc, camera);
+      const hit = raycaster.intersectObjects(pickTargets, false)[0];
+      if (!hit) return null;
+      const id = hit.object.userData.hotspotId as string | undefined;
+      const spot = id ? HOTSPOTS.find((h) => h.id === id) : undefined;
+      return spot ? { spot } : { floor: hit.point };
+    };
+
+    let press: { id: number; x: number; y: number; lastX: number; lastY: number; dragging: boolean } | null = null;
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      press = { id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, dragging: false };
+      canvas.setPointerCapture(e.pointerId);
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (press && e.pointerId === press.id) {
+        if (!press.dragging && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) {
+          press.dragging = true;
+          walk = null; // looking around takes over from an automatic turn
+          highlight(null);
+          setShowHint(false);
+        }
+        if (press.dragging) {
+          // Drag the view like grabbing the scene.
+          pose.yaw += (e.clientX - press.lastX) * DRAG_LOOK;
+          pose.pitch = Math.max(
+            -PITCH_LIMIT,
+            Math.min(PITCH_LIMIT, pose.pitch + (e.clientY - press.lastY) * DRAG_LOOK),
+          );
+        }
+        press.lastX = e.clientX;
+        press.lastY = e.clientY;
+        return;
+      }
+      if (e.pointerType === 'mouse') {
+        const hit = pick(e.clientX, e.clientY);
+        highlight(hit && 'spot' in hit && hit.spot ? hit.spot.id : null);
+      }
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (!press || e.pointerId !== press.id) return;
+      const wasDrag = press.dragging;
+      press = null;
+      if (wasDrag) return;
+      const hit = pick(e.clientX, e.clientY);
+      if (!hit) return;
+      if ('spot' in hit && hit.spot) {
+        visit(hit.spot);
+      } else if ('floor' in hit && hit.floor) {
+        setMessage(null);
+        startWalk({ x: hit.floor.x, z: hit.floor.z });
+      }
+    };
+
+    const onPointerLeave = () => highlight(null);
+
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+    canvas.addEventListener('pointerleave', onPointerLeave);
+
+    const MOVE_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'];
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (!MOVE_KEYS.includes(key) || e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      keys.add(key);
+      walk = null;
+      setShowHint(false);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key);
+    };
+    const onBlur = () => keys.clear();
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+
+    /* ------------------------------ the loop ----------------------------- */
 
     let raf = 0;
-    let lastPaint = 0;
+    let last = performance.now();
+    let lastScreens = 0;
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
-      const s = live.current;
-      if (!s.turn && now - lastPaint < IDLE_FRAME_MS) return;
-      lastPaint = now;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const reducedMotion = reducedMotionQuery.matches;
 
-      const paintState = { lit: s.lit, t: s.reducedMotion ? 0 : now / 1000 };
+      const beforeX = pose.x;
+      const beforeZ = pose.z;
 
-      if (s.turn) {
-        const { from, to, dir, start } = s.turn;
-        const p = Math.min(1, (now - start) / TURN_MS);
-        const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
-        const offset = Math.round(eased * ROOM_W) * dir;
+      // Keyboard: turn with left/right, walk with up/down.
+      const turn =
+        (keys.has('ArrowLeft') || keys.has('a') ? 1 : 0) - (keys.has('ArrowRight') || keys.has('d') ? 1 : 0);
+      const advance =
+        (keys.has('ArrowUp') || keys.has('w') ? 1 : 0) - (keys.has('ArrowDown') || keys.has('s') ? 1 : 0);
+      pose.yaw += turn * KEY_TURN_SPEED * dt;
+      if (advance) {
+        pose.x += -Math.sin(pose.yaw) * advance * WALK_SPEED * dt;
+        pose.z += -Math.cos(pose.yaw) * advance * WALK_SPEED * dt;
+      }
 
-        bctx.save();
-        bctx.translate(-offset, 0);
-        paintView(bctx, from, paintState);
-        bctx.restore();
-
-        bctx.save();
-        bctx.translate(dir * ROOM_W - offset, 0);
-        paintView(bctx, to, paintState);
-        bctx.restore();
-
-        if (p >= 1) {
-          s.turn = null;
-          s.viewId = to;
-          setViewId(to);
-          setTurning(false);
+      if (walk) {
+        const dx = walk.x - pose.x;
+        const dz = walk.z - pose.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.001) {
+          // Ease in to the destination.
+          const step = Math.min(dist, Math.min(WALK_SPEED, dist * 4 + 0.5) * dt);
+          pose.x += (dx / dist) * step;
+          pose.z += (dz / dist) * step;
+        }
+        const ease = 1 - Math.exp(-7 * dt);
+        let turning = 0;
+        if (walk.yaw !== undefined) {
+          const d = shortestAngle(pose.yaw, walk.yaw);
+          pose.yaw += d * ease;
+          turning = Math.max(turning, Math.abs(d));
+        }
+        if (walk.pitch !== undefined) {
+          const d = walk.pitch - pose.pitch;
+          pose.pitch += d * ease;
+          turning = Math.max(turning, Math.abs(d));
+        }
+        keepInRoom();
+        const moved = Math.hypot(pose.x - beforeX, pose.z - beforeZ);
+        // Furniture in the way: give up on getting closer once we stop making progress.
+        walk.stuckFrames = moved < 0.0005 && dist > 0.05 ? walk.stuckFrames + 1 : 0;
+        const there = dist < 0.04 || walk.stuckFrames > 12;
+        if (there && turning < 0.03) {
+          const onArrive = walk.onArrive;
+          walk = null;
+          onArrive?.();
         }
       } else {
-        paintView(bctx, s.viewId, paintState);
+        keepInRoom();
       }
 
-      const image = bctx.getImageData(0, 0, ROOM_W, ROOM_H);
-      bitCrush(image.data, ROOM_W, ROOM_H);
-      ctx.putImageData(image, 0, 0);
+      // A small bob while walking.
+      const moved = Math.hypot(pose.x - beforeX, pose.z - beforeZ);
+      if (moved > 0.0005 && !reducedMotion) walkPhase += moved * 5.5;
+      const bob = reducedMotion ? 0 : Math.sin(walkPhase) * 0.022;
 
-      // Corner brackets around whatever is hovered or focused.
-      if (!s.turn && s.hoverId) {
-        const spot = ROOM_VIEWS[s.viewId].hotspots.find((h) => h.id === s.hoverId);
-        if (spot) {
-          const { x, y, w, h } = spot.rect;
-          const x0 = x - 2;
-          const y0 = y - 2;
-          const x1 = x + w + 1;
-          const y1 = y + h + 1;
-          const arm = Math.min(5, Math.floor(Math.min(w, h) / 2));
-          ctx.fillStyle = '#f3f7e4';
-          const corners: [number, number, number, number][] = [
-            [x0, y0, 1, 1],
-            [x1, y0, -1, 1],
-            [x0, y1, 1, -1],
-            [x1, y1, -1, -1],
-          ];
-          for (const [cx, cy, dx, dy] of corners) {
-            ctx.fillRect(dx > 0 ? cx : cx - arm + 1, cy, arm, 1);
-            ctx.fillRect(cx, dy > 0 ? cy : cy - arm + 1, 1, arm);
-          }
-        }
+      camera.position.set(pose.x, ROOM.eyeHeight + bob, pose.z);
+      camera.rotation.set(pose.pitch, pose.yaw, 0);
+
+      if (now - lastScreens > SCREEN_FRAME_MS) {
+        lastScreens = now;
+        room.update(reducedMotion ? 0 : now / 1000);
       }
+
+      renderer.setRenderTarget(target);
+      renderer.render(room.scene, camera);
+      renderer.setRenderTarget(null);
+      renderer.render(crush.scene, crush.camera);
     };
-
     raf = requestAnimationFrame(frame);
+
     return () => {
       cancelAnimationFrame(raf);
-      motionQuery.removeEventListener('change', syncMotion);
+      apiRef.current = null;
+      resizeObserver.disconnect();
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerUp);
+      canvas.removeEventListener('pointerleave', onPointerLeave);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      room.dispose();
+      crush.dispose();
+      target.dispose();
+      renderer.dispose();
     };
   }, []);
 
@@ -159,142 +405,61 @@ export function RoomCanvas() {
     return () => window.clearTimeout(id);
   }, [message]);
 
-  const turn = useCallback((dir: 1 | -1) => {
-    const s = live.current;
-    if (s.turn) return;
-    const from = s.viewId;
-    const to = dir === 1 ? ROOM_VIEWS[from].right : ROOM_VIEWS[from].left;
-    setHoverId(null);
-    setMessage(null);
-    if (s.reducedMotion) {
-      setViewId(to);
-      return;
-    }
-    s.turn = { from, to, dir, start: performance.now() };
-    setTurning(true);
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        turn(-1);
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        turn(1);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [turn]);
-
   const leave = () => {
     rememberSiteMode('standard');
     window.location.assign(withBase('/'));
   };
 
-  const activate = (spot: Hotspot) => {
-    const action = spot.action;
-    if (action.type === 'toggle-light') {
-      const next = !live.current.lit;
-      setLit(next);
-      setMessage(next ? 'Lights on.' : 'Lights off.');
-      try {
-        window.localStorage.setItem(LIT_KEY, next ? '1' : '0');
-      } catch {
-        /* not remembered, still works */
-      }
-    } else if (action.type === 'exit') {
-      leave();
-    } else {
-      setMessage(action.line);
-    }
-  };
-
-  // Swipe to turn on touch screens.
-  const swipeStart = useRef<{ x: number; y: number } | null>(null);
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (e.pointerType === 'touch') swipeStart.current = { x: e.clientX, y: e.clientY };
-  };
-  const onPointerUp = (e: React.PointerEvent) => {
-    const start = swipeStart.current;
-    swipeStart.current = null;
-    if (!start) return;
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
-    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.5) turn(dx < 0 ? 1 : -1);
-  };
-
-  const hovered = hoverId ? view.hotspots.find((h) => h.id === hoverId) : null;
-  const caption = message ?? hovered?.label ?? '';
-
-  const turnButton =
-    'absolute top-0 z-10 flex h-full w-[7%] items-center justify-center font-mono text-2xl text-[#c8d4a8]/40 transition-colors hover:text-[#f3f7e4] focus-visible:text-[#f3f7e4] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#94a348] sm:text-4xl';
+  const caption = message ?? hoverLabel ?? (showHint ? 'Click to walk. Drag to look around.' : '');
 
   return (
-    <main className="fixed inset-0 flex select-none flex-col items-center justify-center bg-[#05060a] font-mono">
+    <main className="fixed inset-0 select-none overflow-hidden bg-[#05060a] font-mono">
       <h1 className="sr-only">Adine Johnson&apos;s room</h1>
 
-      <div className="mb-2 flex w-[min(100vw,calc((100dvh-6rem)*16/9))] items-center justify-between px-2 text-xs uppercase tracking-widest text-[#5a6a40]">
-        <span aria-label={`Facing ${view.id}`}>
-          Facing <span className="text-[#94a348]">{view.name}</span>
-        </span>
-        <button
-          type="button"
-          onClick={leave}
-          className="uppercase tracking-widest text-[#5a6a40] transition-colors hover:text-[#f3f7e4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#94a348]"
-        >
-          Standard site
-        </button>
-      </div>
+      <canvas
+        ref={canvasRef}
+        aria-hidden="true"
+        className="absolute inset-0 h-full w-full touch-none"
+        style={{ imageRendering: 'pixelated' }}
+      />
 
-      <div
-        className="relative aspect-video w-[min(100vw,calc((100dvh-6rem)*16/9))] touch-pan-y overflow-hidden"
-        onPointerDown={onPointerDown}
-        onPointerUp={onPointerUp}
-        onPointerLeave={() => setHoverId(null)}
+      {failed && (
+        <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-[#c8d4a8]">
+          The room needs WebGL, which this browser has switched off. The standard site has everything too.
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={leave}
+        className="absolute right-3 top-3 z-10 bg-[#05060a]/70 px-3 py-2 text-xs uppercase tracking-widest text-[#c8d4a8] transition-colors hover:text-[#f3f7e4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#94a348]"
       >
-        <canvas
-          ref={canvasRef}
-          width={ROOM_W}
-          height={ROOM_H}
-          aria-hidden="true"
-          className="absolute inset-0 h-full w-full"
-          style={{ imageRendering: 'pixelated' }}
-        />
+        Standard site
+      </button>
 
-        <button type="button" aria-label="Turn left" onClick={() => turn(-1)} className={`${turnButton} left-0`}>
-          ‹
-        </button>
-        <button type="button" aria-label="Turn right" onClick={() => turn(1)} className={`${turnButton} right-0`}>
-          ›
-        </button>
-
-        {!turning &&
-          view.hotspots.map((spot) => (
-            <button
-              key={`${view.id}-${spot.id}`}
-              type="button"
-              aria-label={spot.label}
-              onClick={() => activate(spot)}
-              onMouseEnter={() => setHoverId(spot.id)}
-              onMouseLeave={() => setHoverId((id) => (id === spot.id ? null : id))}
-              onFocus={() => setHoverId(spot.id)}
-              onBlur={() => setHoverId((id) => (id === spot.id ? null : id))}
-              className="absolute z-20 cursor-pointer bg-transparent outline-none"
-              style={{
-                left: `${(spot.rect.x / ROOM_W) * 100}%`,
-                top: `${(spot.rect.y / ROOM_H) * 100}%`,
-                width: `${(spot.rect.w / ROOM_W) * 100}%`,
-                height: `${(spot.rect.h / ROOM_H) * 100}%`,
-              }}
-            />
-          ))}
-      </div>
+      {/* The same objects as a list, for keyboards and screen readers.
+          Hidden until one of its buttons is focused. */}
+      <nav
+        aria-label="Things in the room"
+        className="absolute left-3 top-3 z-10 flex max-w-[60%] flex-wrap gap-1 opacity-0 focus-within:opacity-100"
+      >
+        {HOTSPOTS.map((spot) => (
+          <button
+            key={spot.id}
+            type="button"
+            onClick={() => apiRef.current?.visit(spot)}
+            onFocus={() => apiRef.current?.highlight(spot.id)}
+            onBlur={() => apiRef.current?.highlight(null)}
+            className="bg-[#05060a]/80 px-2 py-1 text-xs text-[#c8d4a8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#94a348]"
+          >
+            {spot.label}
+          </button>
+        ))}
+      </nav>
 
       <p
         aria-live="polite"
-        className="mt-2 flex min-h-[2.5rem] w-[min(100vw,calc((100dvh-6rem)*16/9))] items-start justify-center px-4 text-center text-sm text-[#c8d4a8]"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex min-h-[3rem] items-center justify-center px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-center text-sm text-[#f3f7e4] [text-shadow:0_1px_0_#05060a,0_0_8px_#05060a]"
       >
         {caption}
       </p>

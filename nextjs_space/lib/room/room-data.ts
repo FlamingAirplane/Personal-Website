@@ -1,20 +1,21 @@
-// The room, described as data: four wall views, and the things you can
-// click in each. Coordinates are in the room's own low-resolution pixels
-// (ROOM_W x ROOM_H), so they stay correct at any screen size.
+// The room, described as data: its size, where you start, and the things you
+// can walk up to. Distances are in metres. X runs west (-) to east (+),
+// Z runs north (-) to south (+), Y is up.
 //
-// To add an object: add a hotspot here, then paint it in lib/room/paint.ts.
+// To add an object: add a hotspot here, then build it in lib/room/build-room.ts.
 
-export const ROOM_W = 320;
-export const ROOM_H = 180;
+export const ROOM = {
+  width: 7, // x: -3.5 .. 3.5
+  depth: 6, // z: -3 .. 3
+  height: 3,
+  eyeHeight: 1.6,
+  /** How close you can get to a wall. */
+  wallMargin: 0.4,
+};
 
-export type ViewId = 'north' | 'east' | 'south' | 'west';
+export const START = { x: 0, z: 0.9, yaw: 0, pitch: 0 };
 
-export interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
+export type Vec3 = [number, number, number];
 
 export type HotspotAction =
   /** Flip the room light. */
@@ -28,134 +29,92 @@ export interface Hotspot {
   id: string;
   /** Short name, shown on hover and read by screen readers. */
   label: string;
-  rect: Rect;
+  /** Centre and size of the clickable volume around the object. */
+  center: Vec3;
+  size: Vec3;
+  /** Where you stand (x, z) when you walk up to it. */
+  stand: [number, number];
   action: HotspotAction;
 }
 
-export interface RoomView {
-  id: ViewId;
-  /** Shown in the compass. */
-  name: string;
-  /** The view you face after turning left / right. */
-  left: ViewId;
-  right: ViewId;
-  hotspots: Hotspot[];
-}
+export const HOTSPOTS: Hotspot[] = [
+  {
+    id: 'window',
+    label: 'Window',
+    center: [0, 1.7, -2.92],
+    size: [3.0, 1.7, 0.3],
+    stand: [0, -0.7],
+    action: { type: 'inspect', line: 'Whatever is out there keeps the same hours you do.' },
+  },
+  {
+    id: 'light-switch',
+    label: 'Light switch',
+    center: [2.3, 1.35, -2.95],
+    size: [0.3, 0.4, 0.2],
+    stand: [2.3, -1.3],
+    action: { type: 'toggle-light' },
+  },
+  {
+    id: 'computer',
+    label: 'Computer',
+    center: [3.1, 1.1, 0],
+    size: [0.5, 0.9, 1.3],
+    stand: [1.7, 0],
+    action: { type: 'inspect', line: 'The computer. The bigger games will live on its desktop.' },
+  },
+  {
+    id: 'shelf',
+    label: 'Shelf',
+    center: [3.34, 1.98, -2.0],
+    size: [0.35, 0.6, 1.3],
+    stand: [2.0, -2.0],
+    action: { type: 'inspect', line: "A shelf for what I'm reading, hearing and building." },
+  },
+  {
+    id: 'door',
+    label: 'Door (leave for the standard site)',
+    center: [-2.2, 1.05, 2.93],
+    size: [1.1, 2.2, 0.25],
+    stand: [-2.2, 1.3],
+    action: { type: 'exit' },
+  },
+  {
+    id: 'arcade',
+    label: 'Arcade machine',
+    center: [0.6, 0.9, 2.55],
+    size: [0.9, 1.85, 0.85],
+    stand: [0.6, 1.0],
+    action: { type: 'inspect', line: 'The arcade machine. Browser games will run right here.' },
+  },
+  {
+    id: 'toolbox',
+    label: 'Toolbox',
+    center: [2.3, 0.2, 2.4],
+    size: [0.75, 0.5, 0.45],
+    stand: [2.3, 1.2],
+    action: { type: 'inspect', line: 'The toolbox. My tools go in here.' },
+  },
+  {
+    id: 'cinema',
+    label: 'Cinema screen',
+    center: [-3.4, 1.7, 0],
+    size: [0.25, 1.8, 3.4],
+    stand: [-0.8, 0],
+    action: { type: 'inspect', line: 'The screen is blank. It wants headphones first.' },
+  },
+  {
+    id: 'headphones',
+    label: 'Headphones',
+    center: [-3.38, 1.4, 2.1],
+    size: [0.3, 0.55, 0.5],
+    stand: [-2.3, 2.1],
+    action: { type: 'inspect', line: 'Headphones. Putting them on will start the show.' },
+  },
+];
 
-export const START_VIEW: ViewId = 'north';
-
-export const ROOM_VIEWS: Record<ViewId, RoomView> = {
-  north: {
-    id: 'north',
-    name: 'N',
-    left: 'west',
-    right: 'east',
-    hotspots: [
-      {
-        id: 'window',
-        label: 'Window',
-        rect: { x: 86, y: 20, w: 148, h: 80 },
-        action: {
-          type: 'inspect',
-          line: 'Whatever is out there keeps the same hours you do.',
-        },
-      },
-      {
-        id: 'light-switch',
-        label: 'Light switch',
-        rect: { x: 262, y: 60, w: 14, h: 20 },
-        action: { type: 'toggle-light' },
-      },
-    ],
-  },
-  east: {
-    id: 'east',
-    name: 'E',
-    left: 'north',
-    right: 'south',
-    hotspots: [
-      {
-        id: 'computer',
-        label: 'Computer',
-        rect: { x: 100, y: 46, w: 76, h: 52 },
-        action: {
-          type: 'inspect',
-          line: 'The computer. The bigger games will live on its desktop.',
-        },
-      },
-      {
-        id: 'shelf',
-        label: 'Shelf',
-        rect: { x: 204, y: 26, w: 88, h: 30 },
-        action: {
-          type: 'inspect',
-          line: "A shelf for what I'm reading, hearing and building.",
-        },
-      },
-    ],
-  },
-  south: {
-    id: 'south',
-    name: 'S',
-    left: 'east',
-    right: 'west',
-    hotspots: [
-      {
-        id: 'door',
-        label: 'Door (leave for the standard site)',
-        rect: { x: 40, y: 28, w: 58, h: 92 },
-        action: { type: 'exit' },
-      },
-      {
-        id: 'arcade',
-        label: 'Arcade machine',
-        rect: { x: 146, y: 32, w: 60, h: 104 },
-        action: {
-          type: 'inspect',
-          line: 'The arcade machine. Browser games will run right here.',
-        },
-      },
-      {
-        id: 'toolbox',
-        label: 'Toolbox',
-        rect: { x: 238, y: 118, w: 54, h: 30 },
-        action: {
-          type: 'inspect',
-          line: 'The toolbox. My tools go in here.',
-        },
-      },
-    ],
-  },
-  west: {
-    id: 'west',
-    name: 'W',
-    left: 'south',
-    right: 'north',
-    hotspots: [
-      {
-        id: 'cinema',
-        label: 'Cinema screen',
-        rect: { x: 50, y: 22, w: 180, h: 80 },
-        action: {
-          type: 'inspect',
-          line: 'The screen is blank. It wants headphones first.',
-        },
-      },
-      {
-        id: 'headphones',
-        label: 'Headphones',
-        rect: { x: 254, y: 58, w: 32, h: 40 },
-        action: {
-          type: 'inspect',
-          line: 'Headphones. Putting them on will start the show.',
-        },
-      },
-    ],
-  },
-};
-
-export function hotspotRect(view: ViewId, id: string): Rect {
-  const spot = ROOM_VIEWS[view].hotspots.find((h) => h.id === id);
-  if (!spot) throw new Error(`No hotspot "${id}" in view "${view}"`);
-  return spot.rect;
-}
+/** Floor areas taken up by furniture, which you walk around: [x0, x1, z0, z1]. */
+export const OBSTACLES: [number, number, number, number][] = [
+  [2.55, 3.5, -1.15, 1.15], // desk
+  [0.2, 1.0, 2.15, 3.0], // arcade machine
+  [1.95, 2.65, 2.2, 2.6], // toolbox
+];
