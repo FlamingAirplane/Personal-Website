@@ -1,18 +1,11 @@
 import { MetadataRoute } from 'next';
-import { headers } from 'next/headers';
+import { SITE_URL } from '@/lib/site';
 
-export const dynamic = 'force-dynamic';
+export const dynamic = 'force-static';
 
 export default function robots(): MetadataRoute.Robots {
-  let siteUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
-  try {
-    const headersList = headers();
-    const host = headersList?.get?.('x-forwarded-host');
-    if (host) siteUrl = `https://${host}`;
-  } catch (e: any) {}
-
   return {
     rules: { userAgent: '*', allow: '/' },
-    sitemap: `${siteUrl}/sitemap.xml`,
+    sitemap: `${SITE_URL}/sitemap.xml`,
   };
 }

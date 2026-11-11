@@ -1,20 +1,16 @@
-export const dynamic = 'force-dynamic';
-
-import { prisma } from '@/lib/prisma';
 import { notFound } from 'next/navigation';
 import { ProjectPageClient } from '@/components/project-page-client';
+import { portfolioItems } from '@/lib/content';
 
-export default async function ProjectPage({ params }: { params: { slug: string } }) {
-  try {
-    const item = await prisma.portfolioItem.findUnique({
-      where: { slug: params.slug },
-    });
+// One static page per project in lib/content.ts.
+export function generateStaticParams() {
+  return portfolioItems.map((item) => ({ slug: item.slug }));
+}
 
-    if (!item) return notFound();
+export const dynamicParams = false;
 
-    const safeItem = JSON.parse(JSON.stringify(item));
-    return <ProjectPageClient item={safeItem} />;
-  } catch {
-    return notFound();
-  }
+export default function ProjectPage({ params }: { params: { slug: string } }) {
+  const item = portfolioItems.find((p) => p.slug === params.slug);
+  if (!item) return notFound();
+  return <ProjectPageClient item={item} />;
 }

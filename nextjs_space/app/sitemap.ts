@@ -1,22 +1,19 @@
 import { MetadataRoute } from 'next';
-import { headers } from 'next/headers';
+import { portfolioItems } from '@/lib/content';
+import { SITE_URL } from '@/lib/site';
 
-export const dynamic = 'force-dynamic';
+export const dynamic = 'force-static';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  let siteUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
-  try {
-    const headersList = headers();
-    const host = headersList?.get?.('x-forwarded-host');
-    if (host) siteUrl = `https://${host}`;
-  } catch (e: any) {}
-
+  const lastModified = new Date();
   return [
-    {
-      url: siteUrl,
-      lastModified: new Date(),
-      changeFrequency: 'weekly',
-      priority: 1,
-    },
+    { url: `${SITE_URL}/`, lastModified, changeFrequency: 'weekly', priority: 1 },
+    { url: `${SITE_URL}/room/`, lastModified, changeFrequency: 'monthly', priority: 0.6 },
+    ...portfolioItems.map((item) => ({
+      url: `${SITE_URL}/projects/${item.slug}/`,
+      lastModified,
+      changeFrequency: 'monthly' as const,
+      priority: 0.8,
+    })),
   ];
 }

@@ -31,27 +31,6 @@ export function CustomCursor() {
   const settingsRef = useRef<CursorSettings>(DEFAULTS);
   const [settings, setSettings] = useState<CursorSettings>(DEFAULTS);
 
-  // Fetch cursor settings
-  useEffect(() => {
-    fetch('/api/site-settings')
-      .then(r => r.json())
-      .then(d => {
-        if (d.success && d.settings) {
-          const s: CursorSettings = {
-            cursorEnabled: d.settings.cursorEnabled ?? DEFAULTS.cursorEnabled,
-            cursorSize: d.settings.cursorSize ?? DEFAULTS.cursorSize,
-            cursorHoverSize: d.settings.cursorHoverSize ?? DEFAULTS.cursorHoverSize,
-            cursorLag: d.settings.cursorLag ?? DEFAULTS.cursorLag,
-            cursorColorLight: d.settings.cursorColorLight ?? DEFAULTS.cursorColorLight,
-            cursorColorDark: d.settings.cursorColorDark ?? DEFAULTS.cursorColorDark,
-          };
-          settingsRef.current = s;
-          setSettings(s);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
