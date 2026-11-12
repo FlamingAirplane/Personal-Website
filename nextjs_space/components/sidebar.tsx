@@ -1,23 +1,15 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Gamepad2, Music, Briefcase, User, FileText, Home } from 'lucide-react';
+import { profile } from '@/lib/content';
+import { EnterRoomLink } from './mode-gate';
+import { NAV_ITEMS } from './nav-items';
 
 interface SidebarProps {
   activeSection: string;
-  onNavigate: (id: string) => void;
 }
 
-const navItems = [
-  { id: 'home', label: 'Home', icon: Home },
-  { id: 'game-portfolio', label: 'Games', icon: Gamepad2 },
-  { id: 'sound-portfolio', label: 'Sound', icon: Music },
-  { id: 'work-history', label: 'Work', icon: Briefcase },
-  { id: 'about', label: 'About Me', icon: User },
-  { id: 'contact', label: 'Resume', icon: FileText },
-];
-
-export function Sidebar({ activeSection, onNavigate }: SidebarProps) {
+export function Sidebar({ activeSection }: SidebarProps) {
   return (
     <motion.aside
       initial={{ x: -200 }}
@@ -27,36 +19,40 @@ export function Sidebar({ activeSection, onNavigate }: SidebarProps) {
     >
       <div>
         <div className="px-6 mb-10">
-          <h1 className="text-2xl font-bold text-[#94a348] tracking-wide">Adine.</h1>
-          <p className="text-xs text-[#8a9a70] mt-1">Corner of the Internet</p>
+          <a href="#home" className="block text-2xl font-bold text-[#94a348] tracking-wide">
+            {profile.siteName}
+          </a>
+          <p className="text-xs text-[#8a9a70] mt-1">{profile.strapline}</p>
         </div>
 
-        <nav className="flex flex-col gap-1 px-3">
-          {navItems?.map?.((item: any) => {
-            const Icon = item?.icon;
-            const isActive = activeSection === item?.id;
+        <nav aria-label="Sections" className="flex flex-col gap-1 px-3">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeSection === item.id;
             return (
-              <button
-                key={item?.id}
-                onClick={() => onNavigate?.(item?.id ?? 'home')}
+              <a
+                key={item.id}
+                href={`#${item.id}`}
+                aria-current={isActive ? 'true' : undefined}
                 className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all duration-200 ${
                   isActive
                     ? 'bg-[#94a348] text-[#0a0c04] shadow-md'
                     : 'text-[#c8d4a8] hover:bg-[#151a0a] hover:text-[#94a348]'
                 }`}
               >
-                {Icon ? <Icon size={18} /> : null}
-                {item?.label ?? ''}
-              </button>
+                <Icon size={18} aria-hidden="true" />
+                {item.label}
+              </a>
             );
-          }) ?? []}
+          })}
         </nav>
       </div>
 
       <div className="px-6">
-        <div className="text-xs text-[#5a6a40]">
+        <EnterRoomLink className="mb-6 block border border-[#2e3a1c] px-3 py-2 text-center font-mono text-xs uppercase tracking-widest text-[#94a348] transition-colors hover:border-[#94a348] hover:text-[#f3f7e4]" />
+        <div className="text-xs text-[#8a9a70]">
           <p>© 2026 Inversion</p>
-          <p className="mt-1">By Adine Johnson</p>
+          <p className="mt-1">By {profile.name}</p>
         </div>
       </div>
     </motion.aside>

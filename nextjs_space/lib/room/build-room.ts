@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { DARK_WORLD, type WorldId } from './environments';
+import { addProps } from './props';
 import { HOTSPOTS, ROOM } from './room-data';
 import { ARCADE_SIZE, PC_SIZE, paintArcade, paintComputer } from './screens';
 import { createWallScreens } from './wall-screens';
@@ -18,6 +19,8 @@ export interface Room {
    * `instant` skips the glitchy switch-over.
    */
   setState(lit: boolean, world: WorldId, instant?: boolean): void;
+  /** True while something needs every frame drawn (the walls switching place). */
+  busy(): boolean;
   /** Outline one hotspot (or none). */
   setHighlight(id: string | null): void;
   /** Advance everything that moves. `t` and `dt` are in seconds. */
@@ -32,15 +35,26 @@ export function buildRoom(): Room {
   const scene = new THREE.Scene();
   const disposables: { dispose(): void }[] = [];
 
+  // One material per colour, shared by every box of that colour.
+  const lambertCache = new Map<string, THREE.MeshLambertMaterial>();
   const lambert = (color: string) => {
-    const m = new THREE.MeshLambertMaterial({ color });
-    disposables.push(m);
+    let m = lambertCache.get(color);
+    if (!m) {
+      m = new THREE.MeshLambertMaterial({ color });
+      lambertCache.set(color, m);
+      disposables.push(m);
+    }
     return m;
   };
   // Unlit and unaffected by fog: for things that make their own light.
+  const glowCache = new Map<string, THREE.MeshBasicMaterial>();
   const glow = (color: string) => {
-    const m = new THREE.MeshBasicMaterial({ color, fog: false });
-    disposables.push(m);
+    let m = glowCache.get(color);
+    if (!m) {
+      m = new THREE.MeshBasicMaterial({ color, fog: false });
+      glowCache.set(color, m);
+      disposables.push(m);
+    }
     return m;
   };
 
@@ -68,6 +82,24 @@ export function buildRoom(): Room {
     const mesh = box(material, thickness, thickness, from.distanceTo(to), 0, 0, 0);
     mesh.position.copy(from).add(to).multiplyScalar(0.5);
     mesh.lookAt(to);
+    return mesh;
+  };
+
+  /** An upright cylinder centred at (x, y, z). */
+  const disc = (
+    material: THREE.Material,
+    radius: number,
+    height: number,
+    x: number,
+    y: number,
+    z: number,
+    parent: THREE.Object3D = scene,
+  ) => {
+    const geometry = new THREE.CylinderGeometry(radius, radius, height, 12);
+    disposables.push(geometry);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    parent.add(mesh);
     return mesh;
   };
 
@@ -150,7 +182,7 @@ export function buildRoom(): Room {
   // A small light so the switch can be found in the dark.
   const switchLed = box(glow('#f07a5a'), 0.045, 0.045, 0.02, SWITCH_X, SWITCH_Y + 0.14, northZ + 0.02);
 
-  /* --------------------- east: desk, computer, shelf --------------------- */
+  /* ------------------------- east: desk, computer ------------------------ */
 
   const eastX = HALF_W;
   box(woodMat, 0.85, 0.06, 2.2, eastX - 0.45, 0.75, 0);
@@ -162,7 +194,7 @@ export function buildRoom(): Room {
   const greyDark = lambert('#3a4048');
   const greyMid = lambert('#6b7480');
   const black = lambert('#0b0d18');
-  const DESK_TOP = 0.78;
+  const DESK_TOP = ROOM.deskTop;
 
   // 27-inch monitor (16:9, 598 x 336 mm picture).
   const MON_X = eastX - 0.3;
@@ -242,20 +274,6 @@ export function buildRoom(): Room {
   rod(greyDark, 0.03, 0.11, armTip.x + 0.01, MIC_Y, armTip.z); // mic body
   rod(lambert('#1a1e10'), 0.037, 0.1, armTip.x - 0.095, MIC_Y, armTip.z); // windscreen
 
-  const SHELF_Z = -2.0;
-  const SHELF_Y = 1.72;
-  box(woodMat, 0.28, 0.04, 1.2, eastX - 0.14, SHELF_Y, SHELF_Z);
-  box(trimMat, 0.2, 0.12, 0.04, eastX - 0.1, SHELF_Y - 0.08, SHELF_Z - 0.45);
-  box(trimMat, 0.2, 0.12, 0.04, eastX - 0.1, SHELF_Y - 0.08, SHELF_Z + 0.45);
-  const spines = ['#b8405a', '#1d4a5a', '#94a348', '#4a3a8c', '#d4a56a', '#3a8fa0', '#2e3a1c', '#f07a5a', '#6d4fa8', '#5a6a40'];
-  let bookZ = SHELF_Z - 0.5;
-  spines.forEach((color, i) => {
-    const thickness = 0.06 + ((i * 7) % 4) * 0.012;
-    const height = 0.26 + ((i * 5) % 5) * 0.03;
-    box(lambert(color), 0.18, height, thickness, eastX - 0.14, SHELF_Y + 0.02 + height / 2, bookZ + thickness / 2);
-    bookZ += thickness + 0.012;
-  });
-
   /* --------------------- south: door, arcade, toolbox -------------------- */
 
   const southZ = HALF_D;
@@ -317,6 +335,19 @@ export function buildRoom(): Room {
   box(lambert('#b8405a'), 0.07, 0.16, 0.02, westX + 0.09, HP_Y - 0.06, HP_Z + 0.1);
   const headphoneLed = box(glow('#7fd4d8'), 0.02, 0.02, 0.02, westX + 0.14, HP_Y - 0.13, HP_Z + 0.16);
 
+  /* ------------------------ furniture and clutter ------------------------ */
+
+  const props = addProps({
+    scene,
+    lambert,
+    glow,
+    box,
+    beam,
+    rod,
+    disc,
+    track: (d) => disposables.push(d),
+  });
+
   /* -------------------------------- lights ------------------------------- */
 
   // Most of the room's light comes from the wall screens (walls.light).
@@ -372,6 +403,7 @@ export function buildRoom(): Room {
     switchLed.visible = !lit;
     doorGlow.visible = !lit;
     headphoneLed.visible = !lit;
+    props.setLit(lit);
   };
   setState(false, DARK_WORLD, true);
 
@@ -382,6 +414,7 @@ export function buildRoom(): Room {
     floor,
     hitVolumes,
     setState,
+    busy: () => walls.busy(),
     setHighlight(id) {
       outlines.forEach((outline, key) => {
         outline.visible = key === id;
@@ -389,6 +422,7 @@ export function buildRoom(): Room {
     },
     update(t, dt, reducedMotion) {
       walls.update(t, dt, reducedMotion);
+      props.update(t, reducedMotion);
       // The small screens only need redrawing a few times a second.
       if (t - lastScreens < 0.12) return;
       lastScreens = t;

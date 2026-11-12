@@ -99,6 +99,29 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Visitors who asked their system to reduce motion get instant jumps. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* One clear keyboard-focus ring everywhere. */
+:focus-visible {
+  outline: 2px solid #94a348;
+  outline-offset: 2px;
+}
+
+/*
+ * The dark cover behind "Fun or Standard?" hides the page until the
+ * visitor's earlier answer is known. A script in app/layout.tsx reads that
+ * answer before the first paint, so returning Standard visitors never see
+ * the cover at all.
+ */
+html[data-site-mode='standard'] .mode-gate-cover {
+  display: none;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
 }

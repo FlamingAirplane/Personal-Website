@@ -25,18 +25,22 @@ interface ParticleSettings {
   titleText: string;
 }
 
-const DEFAULT_SETTINGS: ParticleSettings = {
+const DEFAULT_SETTINGS: Omit<ParticleSettings, 'titleText'> = {
   mouseRadius: 70,
   pushForce: 8,
   returnSpeed: 0.06,
   friction: 0.85,
   gap: 3,
-  titleText: 'Adine.',
 };
 
-export function PointCloudTitle() {
+/**
+ * The big title, drawn as a cloud of dots that scatter away from the pointer.
+ * It is a drawing, so `text` is also given to screen readers as its label.
+ */
+export function PointCloudTitle({ text }: { text: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const settingsRef = useRef<ParticleSettings>(DEFAULT_SETTINGS);
+  const settingsRef = useRef<ParticleSettings>({ ...DEFAULT_SETTINGS, titleText: text });
+  settingsRef.current.titleText = text;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -49,11 +53,18 @@ export function PointCloudTitle() {
     let mouse = { x: -9999, y: -9999 };
     let frameId = 0;
     let destroyed = false;
+    let visible = true; // on screen?
+    let running = false; // is the draw loop scheduled?
+    let builtWidth = 0;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
     function buildParticles() {
       const displayW = canvas!.clientWidth;
       const displayH = canvas!.clientHeight;
       if (displayW === 0 || displayH === 0) return;
+      builtWidth = displayW;
+      // With reduced motion the dots start in place instead of flying in.
+      const scatter = reducedMotion.matches ? 0 : 300;
 
       // Always use dpr of 1 for sampling to avoid sub-pixel issues
       canvas!.width = displayW;
@@ -86,8 +97,8 @@ export function PointCloudTitle() {
           const idx = (y * displayW + x) * 4;
           if (data[idx + 3] > 128) {
             newParticles.push({
-              x: x + (Math.random() - 0.5) * 300,
-              y: y + (Math.random() - 0.5) * 300,
+              x: x + (Math.random() - 0.5) * scatter,
+              y: y + (Math.random() - 0.5) * scatter,
               originX: x,
               originY: y,
               vx: 0,
@@ -105,7 +116,11 @@ export function PointCloudTitle() {
     }
 
     function draw() {
-      if (destroyed) return;
+      // Stop drawing while the title is scrolled out of view.
+      if (destroyed || !visible) {
+        running = false;
+        return;
+      }
       const w = canvas!.width;
       const h = canvas!.height;
 
@@ -167,8 +182,21 @@ export function PointCloudTitle() {
       mouse = { x: -9999, y: -9999 };
     }
     function onResize() {
-      buildParticles();
+      // Phones fire "resize" whenever the address bar slides in or out.
+      // Only a change of width means the title has to be laid out again.
+      if (canvas!.clientWidth !== builtWidth) buildParticles();
     }
+    function start() {
+      if (running || destroyed) return;
+      running = true;
+      frameId = requestAnimationFrame(draw);
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      visible = entry.isIntersecting;
+      if (visible && builtWidth > 0) start();
+    });
+    observer.observe(canvas);
 
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('mouseleave', onMouseLeave);
@@ -179,11 +207,12 @@ export function PointCloudTitle() {
     // Delay initialization slightly to ensure layout is settled
     const timer = setTimeout(() => {
       buildParticles();
-      frameId = requestAnimationFrame(draw);
+      start();
     }, 200);
 
     return () => {
       destroyed = true;
+      observer.disconnect();
       clearTimeout(timer);
       cancelAnimationFrame(frameId);
       canvas.removeEventListener('mousemove', onMouseMove);
@@ -197,8 +226,11 @@ export function PointCloudTitle() {
   return (
     <canvas
       ref={canvasRef}
+      role="img"
+      aria-label={text}
       className="w-full"
-      style={{ height: '320px', cursor: 'default' }}
+      // Shorter on narrow screens, where the title itself is smaller.
+      style={{ height: 'clamp(180px, 46vw, 320px)', cursor: 'default' }}
     />
   );
 }

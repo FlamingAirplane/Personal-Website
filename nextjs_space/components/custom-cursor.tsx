@@ -2,100 +2,90 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-interface CursorSettings {
-  cursorEnabled: boolean;
-  cursorSize: number;
-  cursorHoverSize: number;
-  cursorLag: number;
-  cursorColorLight: string;
-  cursorColorDark: string;
-}
-
-const DEFAULTS: CursorSettings = {
-  cursorEnabled: true,
-  cursorSize: 12,
-  cursorHoverSize: 40,
-  cursorLag: 15,
-  cursorColorLight: '#0a0c04',
-  cursorColorDark: '#c8d4a8',
+const SETTINGS = {
+  size: 12,
+  hoverSize: 40,
+  /** How quickly the dot catches up with the pointer, per frame (0..1). */
+  lag: 0.15,
+  colorOnLight: '#0a0c04',
+  colorOnDark: '#c8d4a8',
 };
 
+// Anything matching this makes the dot grow. The room's canvas sets
+// data-cursor-hover="true" on itself while the pointer is over an object.
+const INTERACTIVE = 'a, button, [role="button"], input, textarea, select, [onclick], [data-cursor-hover="true"]';
+
+/** A dot that follows the pointer, replacing the system cursor on mouse devices. */
 export function CustomCursor() {
   const dotRef = useRef<HTMLDivElement>(null);
-  const pos = useRef({ x: -100, y: -100 });
-  const target = useRef({ x: -100, y: -100 });
   const [color, setColor] = useState('#94a348');
   const [isHovering, setIsHovering] = useState(false);
   const [visible, setVisible] = useState(false);
-  const frameRef = useRef<number>(0);
-  const settingsRef = useRef<CursorSettings>(DEFAULTS);
-  const [settings, setSettings] = useState<CursorSettings>(DEFAULTS);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
     const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     if (isTouchDevice) return;
-    if (!settingsRef.current.cursorEnabled) return;
 
     setVisible(true);
 
-    const handleMouseMove = (e: MouseEvent) => {
-      target.current = { x: e.clientX, y: e.clientY };
+    const pos = { x: -100, y: -100 };
+    const target = { x: -100, y: -100 };
+    let moved = false;
+    let frame = 0;
 
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      if (el) {
-        const bg = getComputedStyle(el).backgroundColor;
-        if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
-          const match = bg.match(/\d+/g);
-          if (match && match.length >= 3) {
-            const r = parseInt(match[0]);
-            const g = parseInt(match[1]);
-            const b = parseInt(match[2]);
-            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-            if (luminance > 0.5) {
-              setColor(settingsRef.current.cursorColorLight);
-            } else {
-              setColor(settingsRef.current.cursorColorDark);
-            }
-          }
+    const onMouseMove = (e: MouseEvent) => {
+      target.x = e.clientX;
+      target.y = e.clientY;
+      moved = true;
+    };
+
+    const onMouseLeave = () => {
+      target.x = target.y = pos.x = pos.y = -100;
+    };
+
+    // Looking up what is under the pointer is not free, so it happens here,
+    // at most once per frame, instead of on every mouse event.
+    const inspect = () => {
+      const el = document.elementFromPoint(target.x, target.y) as HTMLElement | null;
+      if (!el) return;
+      const bg = getComputedStyle(el).backgroundColor;
+      if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+        const match = bg.match(/\d+/g);
+        if (match && match.length >= 3) {
+          const luminance = (0.299 * +match[0] + 0.587 * +match[1] + 0.114 * +match[2]) / 255;
+          setColor(luminance > 0.5 ? SETTINGS.colorOnLight : SETTINGS.colorOnDark);
         }
       }
-
-      const interactive = (el as HTMLElement)?.closest?.('a, button, [role="button"], input, textarea, select, [onclick]');
-      setIsHovering(!!interactive);
+      setIsHovering(Boolean(el.closest(INTERACTIVE)));
     };
 
-    const handleMouseLeave = () => {
-      target.current = { x: -100, y: -100 };
-      pos.current = { x: -100, y: -100 };
-    };
-
-    function animate() {
-      const lerp = settingsRef.current.cursorLag / 100;
-      pos.current.x += (target.current.x - pos.current.x) * lerp;
-      pos.current.y += (target.current.y - pos.current.y) * lerp;
-
-      if (dotRef.current) {
-        dotRef.current.style.transform = `translate(${pos.current.x}px, ${pos.current.y}px) translate(-50%, -50%)`;
+    const animate = () => {
+      if (moved) {
+        moved = false;
+        inspect();
       }
+      pos.x += (target.x - pos.x) * SETTINGS.lag;
+      pos.y += (target.y - pos.y) * SETTINGS.lag;
+      if (dotRef.current) {
+        dotRef.current.style.transform = `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%)`;
+      }
+      frame = requestAnimationFrame(animate);
+    };
 
-      frameRef.current = requestAnimationFrame(animate);
-    }
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseleave', handleMouseLeave);
-    frameRef.current = requestAnimationFrame(animate);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseleave', onMouseLeave);
+    frame = requestAnimationFrame(animate);
 
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseleave', handleMouseLeave);
-      cancelAnimationFrame(frameRef.current);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseleave', onMouseLeave);
+      cancelAnimationFrame(frame);
     };
-  }, [settings]);
+  }, []);
 
-  if (!visible || !settings.cursorEnabled) return null;
+  if (!visible) return null;
 
-  const dotSize = isHovering ? settings.cursorHoverSize : settings.cursorSize;
+  const dotSize = isHovering ? SETTINGS.hoverSize : SETTINGS.size;
 
   return (
     <>
@@ -106,6 +96,7 @@ export function CustomCursor() {
       `}</style>
       <div
         ref={dotRef}
+        aria-hidden="true"
         className="fixed top-0 left-0 pointer-events-none z-[9999] mix-blend-difference"
         style={{
           width: `${dotSize}px`,
