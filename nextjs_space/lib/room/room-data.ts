@@ -32,6 +32,9 @@ export type HotspotAction =
   /** Admin preview only: just select the object. */
   | { type: 'select' };
 
+/** The part of the site's content an object opens when you use it (see room-panel.tsx). */
+export type PanelId = 'games' | 'playable' | 'sound' | 'work' | 'about' | 'skills';
+
 export interface ObjectDef {
   id: string;
   label: string;
@@ -41,7 +44,7 @@ export interface ObjectDef {
   /** Do you walk around it? */
   solid: boolean;
   /** Present when it can be clicked by default. */
-  hotspot?: { action: HotspotAction; world?: string };
+  hotspot?: { action: HotspotAction; world?: string; panel?: PanelId };
 }
 
 export const OBJECTS: ObjectDef[] = [
@@ -62,6 +65,7 @@ export const OBJECTS: ObjectDef[] = [
     hotspot: {
       action: { type: 'inspect', line: "The record player. What I've been listening to will spin here." },
       world: 'sunset',
+      panel: 'sound',
     },
   },
   {
@@ -87,6 +91,7 @@ export const OBJECTS: ObjectDef[] = [
     hotspot: {
       action: { type: 'inspect', line: 'The computer. The bigger games will live on its desktop.' },
       world: 'forest',
+      panel: 'games',
     },
   },
   { id: 'speakers', label: 'Studio speakers', group: 'East wall', anchor: 'east', solid: false },
@@ -102,6 +107,7 @@ export const OBJECTS: ObjectDef[] = [
     hotspot: {
       action: { type: 'inspect', line: "The bookcase. What I'm reading goes on these shelves." },
       world: 'city',
+      panel: 'about',
     },
   },
   {
@@ -113,6 +119,7 @@ export const OBJECTS: ObjectDef[] = [
     hotspot: {
       action: { type: 'inspect', line: 'The arcade machine. Browser games will run right here.' },
       world: 'sunset',
+      panel: 'playable',
     },
   },
   {
@@ -124,6 +131,7 @@ export const OBJECTS: ObjectDef[] = [
     hotspot: {
       action: { type: 'inspect', line: 'The toolbox. My tools go in here.' },
       world: 'forest',
+      panel: 'skills',
     },
   },
   {
@@ -135,6 +143,7 @@ export const OBJECTS: ObjectDef[] = [
     hotspot: {
       action: { type: 'inspect', line: "The whiteboard. What I'm working on right now goes up here." },
       world: 'forest',
+      panel: 'work',
     },
   },
   {
@@ -165,6 +174,7 @@ export const OBJECTS: ObjectDef[] = [
     hotspot: {
       action: { type: 'inspect', line: 'Headphones. Putting them on will start the show.' },
       world: 'city',
+      panel: 'sound',
     },
   },
   { id: 'couch', label: 'Couch and controller', group: 'Floor', anchor: 'west', solid: true },

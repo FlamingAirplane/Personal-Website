@@ -21,7 +21,7 @@ import {
 import { loadModel, placeModel } from './models';
 import { createNavigator, type Navigator } from './pathfinding';
 import { addProps } from './props';
-import { anchorShift, OBJECTS, ROOM, type Anchor, type HotspotAction } from './room-data';
+import { anchorShift, OBJECTS, ROOM, type Anchor, type HotspotAction, type PanelId } from './room-data';
 import { ARCADE_SIZE, PC_SIZE, paintArcade, paintComputer } from './screens';
 import { createWallScreens } from './wall-screens';
 import { buildWorlds, itemWorldId } from './worlds';
@@ -41,6 +41,8 @@ export interface RuntimeHotspot {
   /** The place the walls switch to on arrival; empty for none. */
   world: string;
   card: CardCfg | null;
+  /** The part of the site's content it opens, unless it has a card of its own. */
+  panel: PanelId | null;
 }
 
 export interface Layout {
@@ -90,6 +92,7 @@ interface Placed {
   interactiveByDefault: boolean;
   defaultAction?: HotspotAction;
   defaultWorld?: string;
+  defaultPanel?: PanelId;
   holder: THREE.Group;
   content?: THREE.Group;
 }
@@ -567,6 +570,7 @@ export function buildRoom(config: RoomConfig, resolve: Resolver, options: BuildO
       interactiveByDefault: def.hotspot !== undefined,
       defaultAction: def.hotspot?.action,
       defaultWorld: def.hotspot?.world,
+      defaultPanel: def.hotspot?.panel,
       holder,
       content,
     });
@@ -733,6 +737,8 @@ export function buildRoom(config: RoomConfig, resolve: Resolver, options: BuildO
         action: action.type === 'inspect' ? { type: 'inspect', line } : action,
         world: hc.background?.src ? itemWorldId(p.id) : hc.world || p.defaultWorld || '',
         card: hc.card,
+        // A card or line you wrote yourself takes the place of the site's content.
+        panel: hc.card || hc.line ? null : (p.defaultPanel ?? null),
       });
     }
 

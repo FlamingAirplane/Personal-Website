@@ -8,6 +8,8 @@ import type { RoomConfig } from '@/lib/room/config';
 import { createCrushPass, type CrushPass } from '@/lib/room/crush-pass';
 import { rememberSiteMode } from '@/lib/site-mode';
 import { withBase } from '@/lib/site';
+import type { PanelId } from '@/lib/room/room-data';
+import { RoomPanel } from './room-panel';
 
 const LIT_KEY = 'room-lit';
 const MESSAGE_MS = 4500;
@@ -78,6 +80,7 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [card, setCard] = useState<CardView | null>(null);
+  const [panel, setPanel] = useState<PanelId | null>(null);
   const [showHint, setShowHint] = useState(true);
   const [ready, setReady] = useState(false);
   const [touch, setTouch] = useState(false);
@@ -178,6 +181,7 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
       if (!room) return;
       setShowHint(false);
       setCard(null);
+      setPanel(null);
       const path = room.layout.navigator.route({ x: pose.x, z: pose.z }, to);
       if (reducedMotionQuery.matches || !cfg.player.glide) {
         // No gliding: arrive at once.
@@ -212,6 +216,10 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
         }
       } else if (action.type === 'exit') {
         leave();
+      } else if (action.type === 'inspect' && spot.panel && !live.current.editor) {
+        // The site's own content (games, work, about...) opens in front of the room.
+        setMessage(null);
+        setPanel(spot.panel);
       } else if (action.type === 'inspect') {
         if (action.line) setMessage(action.line);
         if (spot.card) {
@@ -385,7 +393,10 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
 
     const MOVE_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'];
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setCard(null);
+      if (e.key === 'Escape') {
+        setCard(null);
+        setPanel(null);
+      }
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (!MOVE_KEYS.includes(key) || e.metaKey || e.ctrlKey || e.altKey) return;
       // Typing in the admin page's fields must not walk the camera.
@@ -652,6 +663,8 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
           ))}
         </nav>
       )}
+
+      {panel && <RoomPanel id={panel} onClose={() => setPanel(null)} />}
 
       {card && (
         <aside
