@@ -196,7 +196,7 @@ const rawPortfolioItems: PortfolioItem[] = [
     description: '',
     imageUrl: '',
     projectLink: '#',
-    youtubeUrl: 'https://www.youtube.com/watch?v=CW5oGRx9CLM',
+    youtubeUrl: 'https://youtu.be/CNx3Cd3rXGI',
     year: 2026,
     type: 'sound',
     tags: 'Sound Replacement',
