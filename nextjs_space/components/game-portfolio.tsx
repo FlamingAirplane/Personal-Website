@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useInView } from 'react-intersection-observer';
 import { Gamepad2, ExternalLink, Calendar, ArrowRight } from 'lucide-react';
 import { useState } from 'react';
+import { hasProjectPageContent } from '@/lib/content';
 import { TiltCard } from './tilt-card';
 
 interface Props {
@@ -25,7 +26,7 @@ export function GamePortfolio({ items }: Props) {
         className="max-w-5xl mx-auto"
       >
         <div className="flex items-center gap-3 mb-8">
-          <Gamepad2 className="text-[#94a348]" size={28} />
+          <Gamepad2 className="text-[#94a348]" size={28} aria-hidden="true" />
           <h2 className="text-3xl font-bold text-[#f3f7e4] tracking-tight">Game Portfolio</h2>
         </div>
 
@@ -81,7 +82,7 @@ function PortfolioCard({ item, index, inView }: { item: any; index: number; inVi
                 <h3 className="text-xl font-bold text-[#f3f7e4] mt-1">{safeItem?.title ?? 'Untitled'}</h3>
               </div>
               <div className="flex items-center gap-1 text-[#8a9a70] text-sm">
-                <Calendar size={14} />
+                <Calendar size={14} aria-hidden="true" />
                 <span>{safeItem?.year ?? ''}</span>
               </div>
             </div>
@@ -101,7 +102,8 @@ function PortfolioCard({ item, index, inView }: { item: any; index: number; inVi
             )}
 
             <div className="flex flex-wrap gap-3 mt-4">
-              {safeItem?.slug && (
+              {/* Only offered once the project page has more than this card does. */}
+              {safeItem?.slug && hasProjectPageContent(safeItem) && (
                 <Link
                   href={`/projects/${safeItem.slug}`}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-[#94a348] text-[#0a0c04] text-sm font-semibold rounded-lg hover:bg-[#a8b850] transition-colors"

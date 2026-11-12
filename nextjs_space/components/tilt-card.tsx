@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 
 interface TiltCardProps {
   children: React.ReactNode;
@@ -12,9 +12,11 @@ export function TiltCard({ children, className = '' }: TiltCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [tilt, setTilt] = useState({ rotateX: 0, rotateY: 0 });
   const [isHovering, setIsHovering] = useState(false);
+  // No tilting for visitors who asked their system to reduce motion.
+  const still = useReducedMotion();
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!cardRef.current) return;
+    if (still || !cardRef.current) return;
     const rect = cardRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -39,7 +41,7 @@ export function TiltCard({ children, className = '' }: TiltCardProps) {
       animate={{
         rotateX: tilt.rotateX,
         rotateY: tilt.rotateY,
-        scale: isHovering ? 1.02 : 1,
+        scale: isHovering && !still ? 1.02 : 1,
       }}
       transition={{ type: 'spring', stiffness: 300, damping: 20 }}
       style={{ perspective: '1000px', transformStyle: 'preserve-3d' }}

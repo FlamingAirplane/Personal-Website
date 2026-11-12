@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useInView } from 'react-intersection-observer';
 import { Music, ExternalLink, Calendar, ArrowRight } from 'lucide-react';
 import { useState } from 'react';
+import { hasProjectPageContent } from '@/lib/content';
 import { TiltCard } from './tilt-card';
 
 interface Props {
@@ -25,7 +26,7 @@ export function SoundPortfolio({ items }: Props) {
         className="max-w-5xl mx-auto"
       >
         <div className="flex items-center gap-3 mb-8">
-          <Music className="text-[#94a348]" size={28} />
+          <Music className="text-[#94a348]" size={28} aria-hidden="true" />
           <h2 className="text-3xl font-bold text-[#f3f7e4] tracking-tight">Sound Portfolio</h2>
         </div>
 
@@ -74,14 +75,15 @@ function SoundCard({ item, index, inView }: { item: any; index: number; inView: 
             <div className="flex items-center justify-between mb-2">
               <p className="text-[#94a348] text-xs font-semibold uppercase tracking-wider">{safeItem?.category ?? 'Sound Design'}</p>
               <div className="flex items-center gap-1 text-[#8a9a70] text-sm">
-                <Calendar size={14} />
+                <Calendar size={14} aria-hidden="true" />
                 <span>{safeItem?.year ?? ''}</span>
               </div>
             </div>
             <h3 className="text-xl font-bold text-[#f3f7e4]">{safeItem?.title ?? 'Untitled'}</h3>
             <p className="text-[#c8d4a8] text-sm mt-3 leading-relaxed">{safeItem?.description ?? ''}</p>
             <div className="flex flex-wrap gap-3 mt-4">
-              {safeItem?.slug && (
+              {/* Only offered once the project page has more than this card does. */}
+              {safeItem?.slug && hasProjectPageContent(safeItem) && (
                 <Link
                   href={`/projects/${safeItem.slug}`}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-[#94a348] text-[#0a0c04] text-sm font-semibold rounded-lg hover:bg-[#a8b850] transition-colors"

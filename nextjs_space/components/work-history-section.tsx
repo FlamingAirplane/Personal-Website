@@ -22,7 +22,7 @@ export function WorkHistorySection({ items }: Props) {
         className="max-w-5xl mx-auto"
       >
         <div className="flex items-center gap-3 mb-8">
-          <Briefcase className="text-[#94a348]" size={28} />
+          <Briefcase className="text-[#94a348]" size={28} aria-hidden="true" />
           <h2 className="text-3xl font-bold text-[#f3f7e4] tracking-tight">Work History</h2>
         </div>
 
@@ -43,6 +43,7 @@ export function WorkHistorySection({ items }: Props) {
 function WorkItem({ item, index, inView }: { item: any; index: number; inView: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const safeItem = item ?? {};
+  const panelId = `work-${safeItem?.id ?? index}`;
 
   return (
     <motion.div
@@ -52,7 +53,10 @@ function WorkItem({ item, index, inView }: { item: any; index: number; inView: b
       className="bg-[#1a2e38] rounded-xl overflow-hidden shadow-md hover:shadow-lg transition-shadow"
     >
       <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls={panelId}
         className="w-full flex items-center justify-between p-5 text-left"
       >
         <div className="flex-1">
@@ -68,7 +72,7 @@ function WorkItem({ item, index, inView }: { item: any; index: number; inView: b
           animate={{ rotate: expanded ? 180 : 0 }}
           transition={{ duration: 0.3, ease: 'easeInOut' }}
         >
-          <ChevronDown size={20} className="text-[#94a348]" />
+          <ChevronDown size={20} className="text-[#94a348]" aria-hidden="true" />
         </motion.div>
       </button>
 
@@ -76,6 +80,7 @@ function WorkItem({ item, index, inView }: { item: any; index: number; inView: b
         {expanded && safeItem?.description && (
           <motion.div
             key="content"
+            id={panelId}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}

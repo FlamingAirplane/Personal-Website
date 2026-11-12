@@ -1,14 +1,27 @@
 // All of the site's content lives in this file. To change the site, edit
 // this file and push: GitHub rebuilds and republishes it automatically.
 //
-// Images go in public/images/ and are referenced as "/images/your-file.png".
+// Images go in public/images/ and are referenced as "/images/your-file.jpg".
+// Keep them small: about 1000 pixels wide is plenty for a project cover.
 
 import { withBase } from './site';
 
 export interface Profile {
   name: string;
+  /** The big title on the home page, also the logo in the menu. */
+  siteName: string;
+  /** Small line under the big title. */
+  strapline: string;
   tagline: string;
+  /** Short job title, used in search-engine data. */
+  jobTitle: string;
   bio: string;
+  /** Shown in a quote box in the About section. Empty hides the box. */
+  quote: string;
+  /** The "Expertise" paragraph in the About section. */
+  expertise: string;
+  /** Skill tags under the Expertise paragraph. */
+  skills: string[];
   imageUrl: string;
   heroBgUrl: string;
   /** Put the PDF in public/ and set this to e.g. "/resume.pdf". Empty hides the button. */
@@ -48,10 +61,17 @@ export interface WorkHistoryItem {
 
 export const profile: Profile = {
   name: 'Adine Johnson',
+  siteName: 'Adine.',
+  strapline: 'Corner of the Internet',
   tagline: 'Game Designer & Sound Designer attending SCAD',
+  jobTitle: 'Game Designer & Sound Designer',
   bio: 'Hello, I am Adine Johnson and I am a junior systems designer student majoring in Game Design at Savannah College of Art and Design (SCAD). I am a lover of all types of games and enjoy playing, studying, and making them in my spare time. I also am very fond of reading, writing, and learning about anything.',
-  imageUrl: withBase('/images/profilepic.jpeg'),
-  heroBgUrl: withBase('/images/hero-bg.jpeg'),
+  quote: 'The truest form of joy is making others happy',
+  expertise:
+    'My goal is to create elegant Game Design and awe-inspiring Sound Design. My core passion lies in the meticulous craft of creating elegant game design, focusing on intuitive mechanics, compelling narratives, and engaging player experiences. Complementing this, I am deeply committed to developing awe-inspiring sound design, where every auditory element is carefully sculpted to enhance immersion, convey emotion, and elevate the overall interactive journey.',
+  skills: ['Game Design', 'Game Art', 'Game Tech', 'Sound Design', 'SFX Design', 'BG SFX Design'],
+  imageUrl: withBase('/images/profile.jpg'),
+  heroBgUrl: withBase('/images/hero-bg.jpg'),
   resumeUrl: '',
   twitterUrl: '',
   instagramUrl: '',
@@ -66,7 +86,7 @@ export const portfolioItems: PortfolioItem[] = [
     category: 'Game Design & Sound Design',
     description:
       'A collaborative game design and sound design project. FreezePoint combines immersive gameplay mechanics with carefully crafted audio to create a compelling interactive experience.',
-    imageUrl: withBase('/images/portfolio/FrezzePoint.png'),
+    imageUrl: withBase('/images/portfolio/freezepoint.jpg'),
     projectLink: '#',
     year: 2025,
     type: 'game',
@@ -79,7 +99,7 @@ export const portfolioItems: PortfolioItem[] = [
     category: 'Game Design & Sound Design',
     description:
       'A unique game combining creative game design with immersive sound design elements. Players engage with intuitive mechanics in a fun and engaging environment.',
-    imageUrl: withBase('/images/portfolio/WrapersPlease.png'),
+    imageUrl: withBase('/images/portfolio/wrappers-please.png'),
     projectLink: '#',
     year: 2025,
     type: 'game',
@@ -92,7 +112,7 @@ export const portfolioItems: PortfolioItem[] = [
     category: 'Public Speaking & Website Design',
     description:
       'A SCAD Pro project involving public speaking and website design for Parking Day. Combined design skills with professional presentation to create an impactful community event.',
-    imageUrl: withBase('/images/portfolio/ParkingDay.png'),
+    imageUrl: withBase('/images/portfolio/parking-day.png'),
     projectLink: '#',
     year: 2024,
     type: 'game',
@@ -105,7 +125,7 @@ export const portfolioItems: PortfolioItem[] = [
     category: 'Solo Game',
     description:
       'An independently developed solo game project showcasing game design skills from concept to completion.',
-    imageUrl: withBase('/images/portfolio/woodcraft.jpg'),
+    imageUrl: withBase('/images/portfolio/manacy.jpg'),
     projectLink: '#',
     year: 2024,
     type: 'game',
@@ -118,7 +138,7 @@ export const portfolioItems: PortfolioItem[] = [
     category: 'Solo Game',
     description:
       'A solo game project featuring autonomous tracking mechanics and engaging gameplay systems.',
-    imageUrl: withBase('/images/portfolio/AutonomousTracker.png'),
+    imageUrl: withBase('/images/portfolio/autonomous-tracker.jpg'),
     projectLink: '#',
     year: 2024,
     type: 'game',
@@ -131,7 +151,7 @@ export const portfolioItems: PortfolioItem[] = [
     category: 'Project Lead',
     description:
       'Led a team project creating an exciting game experience. As project lead, managed design direction, team coordination, and overall game development.',
-    imageUrl: withBase('/images/portfolio/AotCP.png'),
+    imageUrl: withBase('/images/portfolio/attack-of-the-crab-people.jpg'),
     projectLink: '#',
     year: 2024,
     type: 'game',
@@ -143,7 +163,7 @@ export const portfolioItems: PortfolioItem[] = [
     title: '33,333 ft',
     category: 'Solo Game',
     description: 'A solo game project exploring height and scale in game design.',
-    imageUrl: withBase('/images/portfolio/33333ft.png'),
+    imageUrl: withBase('/images/portfolio/33333-ft.jpg'),
     projectLink: '#',
     year: 2024,
     type: 'game',
@@ -156,7 +176,7 @@ export const portfolioItems: PortfolioItem[] = [
     category: 'Sound Design',
     description:
       'A sound design project creating immersive audio landscapes and effects. Every auditory element was carefully sculpted to enhance the overall experience.',
-    imageUrl: withBase('/images/portfolio/GrimeGoAway.jpg'),
+    imageUrl: withBase('/images/portfolio/grime-go-away.jpg'),
     projectLink: '#',
     year: 2025,
     type: 'sound',
@@ -203,3 +223,23 @@ export const workHistory: WorkHistoryItem[] = [
     endDate: 'March 2023',
   },
 ];
+
+/** True when a project has something to show beyond its card. */
+export function hasProjectPageContent(item: PortfolioItem): boolean {
+  return Boolean(item.subpageContent?.trim()) || parseGallery(item).length > 0;
+}
+
+/** The gallery image paths of a project, already prefixed for the site's address. */
+export function parseGallery(item: PortfolioItem): string[] {
+  try {
+    const list = JSON.parse(item.galleryImages || '[]');
+    return Array.isArray(list) ? list.filter((x) => typeof x === 'string').map(withBase) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** True when the Resume section has anything to show. */
+export function hasResumeSection(p: Profile): boolean {
+  return Boolean(p.resumeUrl || p.twitterUrl || p.instagramUrl);
+}

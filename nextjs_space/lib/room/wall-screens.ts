@@ -118,6 +118,8 @@ export interface WallScreens {
   /** Light cast into the room by whatever the walls are showing. */
   light: THREE.HemisphereLight;
   show(world: WorldId, instant?: boolean): void;
+  /** True while the walls are switching from one place to another. */
+  busy(): boolean;
   update(t: number, dt: number, reducedMotion: boolean): void;
   dispose(): void;
 }
@@ -285,6 +287,9 @@ export function createWallScreens(initial: WorldId): WallScreens {
       material.uniforms.uMix.value = instant ? 1 : 0;
       material.uniforms.uGlitch.value = 0;
       applyLight();
+    },
+    busy() {
+      return progress < 1;
     },
     update(t, dt, reducedMotion) {
       material.uniforms.uTime.value = t;

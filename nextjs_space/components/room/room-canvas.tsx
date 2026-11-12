@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { buildRoom } from '@/lib/room/build-room';
 import { createCrushPass } from '@/lib/room/crush-pass';
 import { DEFAULT_WORLD, type WorldId } from '@/lib/room/environments';
+import { createNavigator, type Point } from '@/lib/room/pathfinding';
 import { HOTSPOTS, OBSTACLES, ROOM, START, type Hotspot } from '@/lib/room/room-data';
 import { rememberSiteMode } from '@/lib/site-mode';
 import { withBase } from '@/lib/site';
@@ -15,18 +16,28 @@ const MESSAGE_MS = 4500;
 // The room is rendered this many pixels along the screen's short side and
 // scaled up with hard edges. This is the bit-crushed look.
 const SHORT_SIDE = 200;
-const LONG_SIDE_MAX = 480;
+const LONG_SIDE_MAX = 720;
 
 const WALK_SPEED = 2.6; // metres per second
 const KEY_TURN_SPEED = 1.9; // radians per second
 const DRAG_LOOK = 0.0045; // radians per pixel dragged
 const PITCH_LIMIT = 1.0;
-const BODY_RADIUS = 0.3;
+/** While nothing is moving, draw about 20 frames a second to save power. */
+const IDLE_FRAME_MS = 50;
 
-/** Where the walk is headed, and what happens on arrival. */
+/** The part of the floor you can stand on. */
+const BOUNDS = {
+  minX: -(ROOM.width / 2 - ROOM.wallMargin),
+  maxX: ROOM.width / 2 - ROOM.wallMargin,
+  minZ: -(ROOM.depth / 2 - ROOM.wallMargin),
+  maxZ: ROOM.depth / 2 - ROOM.wallMargin,
+};
+const navigator2d = createNavigator(OBSTACLES, BOUNDS, ROOM.bodyRadius);
+
+/** A walk in progress, and what happens on arrival. */
 interface Walk {
-  x: number;
-  z: number;
+  /** Points still to walk through, going around furniture; the last is the destination. */
+  path: Point[];
   yaw?: number;
   pitch?: number;
   onArrive?: () => void;
@@ -46,6 +57,11 @@ function shortestAngle(from: number, to: number) {
   return d;
 }
 
+function leave() {
+  rememberSiteMode('standard');
+  window.location.assign(withBase('/'));
+}
+
 export function RoomCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const apiRef = useRef<RoomApi | null>(null);
@@ -53,17 +69,22 @@ export function RoomCanvas() {
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showHint, setShowHint] = useState(true);
-  const [failed, setFailed] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [touch, setTouch] = useState(false);
+  // "unsupported": no WebGL at all. "lost": the browser took the 3D context away.
+  const [problem, setProblem] = useState<null | 'unsupported' | 'lost'>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    setTouch(window.matchMedia('(pointer: coarse)').matches);
+
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' });
     } catch {
-      setFailed(true);
+      setProblem('unsupported');
       return;
     }
     renderer.setPixelRatio(1);
@@ -118,17 +139,17 @@ export function RoomCanvas() {
 
     /* ------------------------------ movement ----------------------------- */
 
+    // The safety net under the route-finding: whatever moved you, you end up
+    // inside the walls and outside the furniture.
     const keepInRoom = () => {
-      const maxX = ROOM.width / 2 - ROOM.wallMargin;
-      const maxZ = ROOM.depth / 2 - ROOM.wallMargin;
-      pose.x = Math.max(-maxX, Math.min(maxX, pose.x));
-      pose.z = Math.max(-maxZ, Math.min(maxZ, pose.z));
+      pose.x = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, pose.x));
+      pose.z = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, pose.z));
       // Slide around furniture: push out along the shallowest side.
       for (const [x0, x1, z0, z1] of OBSTACLES) {
-        const ax0 = x0 - BODY_RADIUS;
-        const ax1 = x1 + BODY_RADIUS;
-        const az0 = z0 - BODY_RADIUS;
-        const az1 = z1 + BODY_RADIUS;
+        const ax0 = x0 - ROOM.bodyRadius;
+        const ax1 = x1 + ROOM.bodyRadius;
+        const az0 = z0 - ROOM.bodyRadius;
+        const az1 = z1 + ROOM.bodyRadius;
         if (pose.x <= ax0 || pose.x >= ax1 || pose.z <= az0 || pose.z >= az1) continue;
         const pushes: [number, () => void][] = [
           [pose.x - ax0, () => (pose.x = ax0)],
@@ -141,25 +162,22 @@ export function RoomCanvas() {
       }
     };
 
-    const startWalk = (next: Omit<Walk, 'stuckFrames'>) => {
+    const startWalk = (to: Point, then: Pick<Walk, 'yaw' | 'pitch' | 'onArrive'> = {}) => {
       setShowHint(false);
+      const path = navigator2d.route({ x: pose.x, z: pose.z }, to);
       if (reducedMotionQuery.matches) {
         // No gliding: arrive at once.
-        pose.x = next.x;
-        pose.z = next.z;
-        if (next.yaw !== undefined) pose.yaw = next.yaw;
-        if (next.pitch !== undefined) pose.pitch = next.pitch;
+        const end = path[path.length - 1];
+        pose.x = end.x;
+        pose.z = end.z;
+        if (then.yaw !== undefined) pose.yaw = then.yaw;
+        if (then.pitch !== undefined) pose.pitch = then.pitch;
         keepInRoom();
         walk = null;
-        next.onArrive?.();
+        then.onArrive?.();
         return;
       }
-      walk = { ...next, stuckFrames: 0 };
-    };
-
-    const leave = () => {
-      rememberSiteMode('standard');
-      window.location.assign(withBase('/'));
+      walk = { path, ...then, stuckFrames: 0 };
     };
 
     const act = (spot: Hotspot) => {
@@ -191,19 +209,22 @@ export function RoomCanvas() {
       const dy = spot.center[1] - ROOM.eyeHeight;
       const dz = spot.center[2] - sz;
       setMessage(null);
-      startWalk({
-        x: sx,
-        z: sz,
-        yaw: Math.atan2(-dx, -dz),
-        pitch: Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, Math.atan2(dy, Math.hypot(dx, dz)))),
-        onArrive: () => act(spot),
-      });
+      startWalk(
+        { x: sx, z: sz },
+        {
+          yaw: Math.atan2(-dx, -dz),
+          pitch: Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, Math.atan2(dy, Math.hypot(dx, dz)))),
+          onArrive: () => act(spot),
+        },
+      );
     };
 
     const highlight = (id: string | null) => {
       if (id === hoverId) return;
       hoverId = id;
       room.setHighlight(id);
+      // The site's custom cursor grows over anything marked like this.
+      canvas.dataset.cursorHover = id ? 'true' : 'false';
       setHoverLabel(id ? (HOTSPOTS.find((h) => h.id === id)?.label ?? null) : null);
     };
 
@@ -307,9 +328,15 @@ export function RoomCanvas() {
 
     let raf = 0;
     let last = performance.now();
+    let drawnOnce = false;
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
+
+      // Standing still with nothing changing: no need for every frame.
+      const active = walk !== null || keys.size > 0 || (press?.dragging ?? false) || room.busy() || !drawnOnce;
+      if (!active && now - last < IDLE_FRAME_MS) return;
+
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const reducedMotion = reducedMotionQuery.matches;
@@ -329,15 +356,20 @@ export function RoomCanvas() {
       }
 
       if (walk) {
-        const dx = walk.x - pose.x;
-        const dz = walk.z - pose.z;
+        const next = walk.path[0];
+        const isLast = walk.path.length === 1;
+        const dx = next.x - pose.x;
+        const dz = next.z - pose.z;
         const dist = Math.hypot(dx, dz);
         if (dist > 0.001) {
-          // Ease in to the destination.
-          const step = Math.min(dist, Math.min(WALK_SPEED, dist * 4 + 0.5) * dt);
+          // Full speed around corners; ease in only to the destination.
+          const speed = isLast ? Math.min(WALK_SPEED, dist * 4 + 0.5) : WALK_SPEED;
+          const step = Math.min(dist, speed * dt);
           pose.x += (dx / dist) * step;
           pose.z += (dz / dist) * step;
         }
+        if (!isLast && dist < 0.06) walk.path.shift();
+
         const ease = 1 - Math.exp(-7 * dt);
         let turning = 0;
         if (walk.yaw !== undefined) {
@@ -352,9 +384,9 @@ export function RoomCanvas() {
         }
         keepInRoom();
         const moved = Math.hypot(pose.x - beforeX, pose.z - beforeZ);
-        // Furniture in the way: give up on getting closer once we stop making progress.
+        // Something still in the way: give up once we stop making progress.
         walk.stuckFrames = moved < 0.0005 && dist > 0.05 ? walk.stuckFrames + 1 : 0;
-        const there = dist < 0.04 || walk.stuckFrames > 12;
+        const there = (isLast && dist < 0.04) || walk.stuckFrames > 12;
         if (there && turning < 0.03) {
           const onArrive = walk.onArrive;
           walk = null;
@@ -378,13 +410,27 @@ export function RoomCanvas() {
       renderer.render(room.scene, camera);
       renderer.setRenderTarget(null);
       renderer.render(crush.scene, crush.camera);
+
+      if (!drawnOnce) {
+        drawnOnce = true;
+        setReady(true);
+      }
     };
     raf = requestAnimationFrame(frame);
+
+    // Browsers can take the 3D context away, mostly on phones short of memory.
+    const onContextLost = (e: Event) => {
+      e.preventDefault();
+      cancelAnimationFrame(raf);
+      setProblem('lost');
+    };
+    canvas.addEventListener('webglcontextlost', onContextLost);
 
     return () => {
       cancelAnimationFrame(raf);
       apiRef.current = null;
       resizeObserver.disconnect();
+      canvas.removeEventListener('webglcontextlost', onContextLost);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);
@@ -407,12 +453,8 @@ export function RoomCanvas() {
     return () => window.clearTimeout(id);
   }, [message]);
 
-  const leave = () => {
-    rememberSiteMode('standard');
-    window.location.assign(withBase('/'));
-  };
-
-  const caption = message ?? hoverLabel ?? (showHint ? 'Click to walk. Drag to look around.' : '');
+  const hint = touch ? 'Tap to walk. Drag to look around.' : 'Click to walk. Drag to look around.';
+  const caption = message ?? hoverLabel ?? (showHint && ready ? hint : '');
 
   return (
     <main className="fixed inset-0 select-none overflow-hidden bg-[#05060a] font-mono">
@@ -425,25 +467,53 @@ export function RoomCanvas() {
         style={{ imageRendering: 'pixelated' }}
       />
 
-      {failed && (
-        <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-[#c8d4a8]">
-          The room needs WebGL, which this browser has switched off. The standard site has everything too.
+      {!ready && !problem && (
+        <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm uppercase tracking-widest text-[#8a9a70]">
+          Loading the room…
         </p>
+      )}
+
+      {problem && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-[#05060a] px-6 text-center text-sm text-[#c8d4a8]">
+          <p className="max-w-md">
+            {problem === 'unsupported'
+              ? 'The room needs WebGL, which this browser has switched off. The standard site has everything too.'
+              : 'The room lost its connection to the graphics card. Reloading usually brings it back.'}
+          </p>
+          <div className="flex gap-4">
+            {problem === 'lost' && (
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="border border-[#94a348] bg-[#94a348] px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#0a0c04]"
+              >
+                Reload
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={leave}
+              className="border border-[#2e3a1c] px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#c8d4a8]"
+            >
+              Standard site
+            </button>
+          </div>
+        </div>
       )}
 
       <button
         type="button"
         onClick={leave}
-        className="absolute right-3 top-3 z-10 bg-[#05060a]/70 px-3 py-2 text-xs uppercase tracking-widest text-[#c8d4a8] transition-colors hover:text-[#f3f7e4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#94a348]"
+        className="absolute right-3 top-3 z-10 bg-[#05060a]/70 px-3 py-2 text-xs uppercase tracking-widest text-[#c8d4a8] transition-colors hover:text-[#f3f7e4]"
       >
         Standard site
       </button>
 
-      {/* The same objects as a list, for keyboards and screen readers.
-          Hidden until one of its buttons is focused. */}
+      {/* The same objects as a list, for keyboards and screen readers. It is
+          invisible, and ignores the mouse, until one of its buttons is focused. */}
       <nav
         aria-label="Things in the room"
-        className="absolute left-3 top-3 z-10 flex max-w-[60%] flex-wrap gap-1 opacity-0 focus-within:opacity-100"
+        className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[60%] flex-wrap gap-1 opacity-0 focus-within:pointer-events-auto focus-within:opacity-100"
       >
         {HOTSPOTS.map((spot) => (
           <button
@@ -452,7 +522,7 @@ export function RoomCanvas() {
             onClick={() => apiRef.current?.visit(spot)}
             onFocus={() => apiRef.current?.highlight(spot.id)}
             onBlur={() => apiRef.current?.highlight(null)}
-            className="bg-[#05060a]/80 px-2 py-1 text-xs text-[#c8d4a8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#94a348]"
+            className="bg-[#05060a]/80 px-2 py-1 text-xs text-[#c8d4a8]"
           >
             {spot.label}
           </button>
