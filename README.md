@@ -12,17 +12,25 @@ The site is plain static files. There is no server and no database.
 
 ## Changing what the site says
 
-Everything written on the site lives in one file:
-[`nextjs_space/lib/content.ts`](nextjs_space/lib/content.ts). Edit it, commit,
-and push to `main`; the site republishes itself in a couple of minutes.
+Everything written on the site lives in one data file:
+[`nextjs_space/content/site-content.json`](nextjs_space/content/site-content.json)
+(profile, projects, jobs, and the title/particle/cursor settings).
 
-| To change | Edit in `content.ts` |
-|---|---|
-| Name, tagline, bio, quote, skills | `profile` |
-| A project | its entry in `portfolioItems` |
-| A job | its entry in `workHistory` |
-| Resume | put the PDF in `nextjs_space/public/` and set `profile.resumeUrl` to `'/your-file.pdf'` |
-| Social links | `profile.twitterUrl`, `profile.instagramUrl` |
+**Easiest way: the admin page** at `/Personal-Website/admin/`. It has tabs for
+Games, Sound, Work, Profile & Resume, and Title/Particles/Cursor. Saving puts a
+change in your draft (kept in the browser). **Preview** opens the real site with
+the draft in a new tab, and it updates as you save. **Publish** commits the draft
+to `main` through the GitHub API and the site republishes in about a minute;
+**Discard** throws the draft away.
+
+To sign in, paste a fine-grained GitHub token. Create one at
+<https://github.com/settings/personal-access-tokens/new>, limited to the
+`Personal-Website` repository only, with **Contents: Read and write** and a
+short expiry. The token stays in the browser tab (session storage) and is sent
+only to api.github.com. Uploaded images and the resume go to
+`nextjs_space/public/uploads/`.
+
+You can also edit `site-content.json` by hand, commit, and push to `main`.
 
 Things that appear on their own once they have content:
 
@@ -114,7 +122,9 @@ nextjs_space/
   app/                 pages: home, /room, /projects/<slug>, 404
   components/          the Standard site's sections
   components/room/     the room's page component
-  lib/content.ts       all of the site's words
+  content/             site-content.json: all of the site's words and settings
+  lib/content.ts       typed access to that JSON
+  app/admin/           the admin page (commits to GitHub)
   lib/site.ts          the site's address and base path
   lib/room/            the room
     room-data.ts         size, objects you can use, furniture footprints

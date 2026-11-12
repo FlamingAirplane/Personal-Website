@@ -14,7 +14,7 @@ import { ContactSection } from './contact-section';
 import { FooterSection } from './footer-section';
 import { FloatingParticles } from './floating-particles';
 import { EnterRoomLink } from './mode-gate';
-import { NAV_ITEMS } from './nav-items';
+import { navItems } from './nav-items';
 
 interface Props {
   portfolioItems: PortfolioItem[];
@@ -29,6 +29,7 @@ export function PortfolioClient({ portfolioItems, workHistory, profile }: Props)
   const gameItems = portfolioItems.filter((item) => item.type === 'game');
   const soundItems = portfolioItems.filter((item) => item.type === 'sound');
   const showResume = hasResumeSection(profile);
+  const NAV_ITEMS = navItems(profile);
 
   // Highlight the menu entry for the section being read.
   useEffect(() => {
@@ -59,7 +60,7 @@ export function PortfolioClient({ portfolioItems, workHistory, profile }: Props)
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
     };
-  }, []);
+  }, [NAV_ITEMS.length]);
 
   return (
     <div className="flex min-h-screen bg-[#0a0c04]">

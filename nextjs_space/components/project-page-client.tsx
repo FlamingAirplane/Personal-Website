@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, ArrowRight, Calendar, ExternalLink, Gamepad2, Music, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { parseGallery, type PortfolioItem } from '@/lib/content';
+import { useSiteLinks } from '@/lib/preview';
 import { EnterRoomLink } from './mode-gate';
 
 interface ProjectLink {
@@ -21,6 +22,7 @@ interface Props {
 
 export function ProjectPageClient({ item, previous, next }: Props) {
   const [imgError, setImgError] = useState(false);
+  const links = useSiteLinks();
   const galleryImages = parseGallery(item);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -49,7 +51,7 @@ export function ProjectPageClient({ item, previous, next }: Props) {
       <div className="sticky top-0 z-10 bg-[#0d0f06]/95 backdrop-blur-sm border-b border-[#1a1e10]">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <Link
-            href="/"
+            href={links.home}
             className="flex min-w-0 items-center gap-2 rounded-lg p-2 text-sm font-semibold text-[#94a348] hover:bg-[#1a1e10] transition-colors"
           >
             <ArrowLeft size={20} aria-hidden="true" className="shrink-0" />
@@ -172,7 +174,7 @@ export function ProjectPageClient({ item, previous, next }: Props) {
         {/* On to the neighbouring projects */}
         <nav aria-label="More projects" className="mt-12 grid gap-4 border-t border-[#1a1e10] pt-8 sm:grid-cols-2">
           <Link
-            href={`/projects/${previous.slug}`}
+            href={links.project(previous.slug)}
             className="rounded-xl bg-[#1a2e38] p-5 transition-colors hover:bg-[#21394a]"
           >
             <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#94a348]">
@@ -181,7 +183,7 @@ export function ProjectPageClient({ item, previous, next }: Props) {
             <span className="mt-2 block font-bold">{previous.title}</span>
           </Link>
           <Link
-            href={`/projects/${next.slug}`}
+            href={links.project(next.slug)}
             className="rounded-xl bg-[#1a2e38] p-5 text-right transition-colors hover:bg-[#21394a]"
           >
             <span className="flex items-center justify-end gap-2 text-xs font-semibold uppercase tracking-wider text-[#94a348]">
