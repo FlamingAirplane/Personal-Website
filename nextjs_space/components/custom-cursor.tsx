@@ -1,14 +1,17 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { siteSettings } from '@/lib/content';
 
+// Set from the admin page (Title, Particles & Cursor).
 const SETTINGS = {
-  size: 12,
-  hoverSize: 40,
+  enabled: siteSettings.cursorEnabled,
+  size: siteSettings.cursorSize,
+  hoverSize: siteSettings.cursorHoverSize,
   /** How quickly the dot catches up with the pointer, per frame (0..1). */
-  lag: 0.15,
-  colorOnLight: '#0a0c04',
-  colorOnDark: '#c8d4a8',
+  lag: siteSettings.cursorLag / 100,
+  colorOnLight: siteSettings.cursorColorLight,
+  colorOnDark: siteSettings.cursorColorDark,
 };
 
 // Anything matching this makes the dot grow. The room's canvas sets
@@ -24,7 +27,7 @@ export function CustomCursor() {
 
   useEffect(() => {
     const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    if (isTouchDevice) return;
+    if (!SETTINGS.enabled || isTouchDevice) return;
 
     setVisible(true);
 

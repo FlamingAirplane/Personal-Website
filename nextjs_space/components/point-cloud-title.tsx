@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { siteSettings } from '@/lib/content';
 
 interface Particle {
   x: number;
@@ -25,12 +26,13 @@ interface ParticleSettings {
   titleText: string;
 }
 
+// Set from the admin page (Title, Particles & Cursor). Percentages are stored as whole numbers.
 const DEFAULT_SETTINGS: Omit<ParticleSettings, 'titleText'> = {
-  mouseRadius: 70,
-  pushForce: 8,
-  returnSpeed: 0.06,
-  friction: 0.85,
-  gap: 3,
+  mouseRadius: siteSettings.particleMouseRadius,
+  pushForce: siteSettings.particlePushForce,
+  returnSpeed: siteSettings.particleReturnSpeed / 100,
+  friction: siteSettings.particleFriction / 100,
+  gap: siteSettings.particleGap,
 };
 
 /**
