@@ -2,51 +2,57 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { buildRoom } from '@/lib/room/build-room';
-import { createCrushPass } from '@/lib/room/crush-pass';
-import { DEFAULT_WORLD, type WorldId } from '@/lib/room/environments';
-import { createNavigator, type Point } from '@/lib/room/pathfinding';
-import { HOTSPOTS, OBSTACLES, ROOM, START, type Hotspot } from '@/lib/room/room-data';
+import type { Resolver } from '@/lib/room/assets';
+import { buildRoom, type Room, type RuntimeHotspot } from '@/lib/room/build-room';
+import type { RoomConfig } from '@/lib/room/config';
+import { createCrushPass, type CrushPass } from '@/lib/room/crush-pass';
 import { rememberSiteMode } from '@/lib/site-mode';
 import { withBase } from '@/lib/site';
 
 const LIT_KEY = 'room-lit';
 const MESSAGE_MS = 4500;
 
-// The room is rendered this many pixels along the screen's short side and
-// scaled up with hard edges. This is the bit-crushed look.
-const SHORT_SIDE = 200;
-const LONG_SIDE_MAX = 720;
+/** Settings for the admin preview. */
+export interface EditorHooks {
+  /** The item to outline in green. */
+  selectedId: string | null;
+  /** Called when an item is clicked in the preview. */
+  onSelect: (id: string) => void;
+  /** Change `n` to make the preview walk up to `id`. */
+  visit?: { id: string; n: number } | null;
+}
 
-const WALK_SPEED = 2.6; // metres per second
-const KEY_TURN_SPEED = 1.9; // radians per second
-const DRAG_LOOK = 0.0045; // radians per pixel dragged
-const PITCH_LIMIT = 1.0;
-/** While nothing is moving, draw about 20 frames a second to save power. */
-const IDLE_FRAME_MS = 50;
+interface Props {
+  config: RoomConfig;
+  /** Turns a file reference from the config into an address. */
+  resolve: Resolver;
+  editor?: EditorHooks;
+}
 
-/** The part of the floor you can stand on. */
-const BOUNDS = {
-  minX: -(ROOM.width / 2 - ROOM.wallMargin),
-  maxX: ROOM.width / 2 - ROOM.wallMargin,
-  minZ: -(ROOM.depth / 2 - ROOM.wallMargin),
-  maxZ: ROOM.depth / 2 - ROOM.wallMargin,
-};
-const navigator2d = createNavigator(OBSTACLES, BOUNDS, ROOM.bodyRadius);
+/** The card shown when you look at an item that has one. */
+interface CardView {
+  title: string;
+  text: string;
+  imageUrl: string;
+  link: string;
+  linkLabel: string;
+}
 
 /** A walk in progress, and what happens on arrival. */
 interface Walk {
   /** Points still to walk through, going around furniture; the last is the destination. */
-  path: Point[];
+  path: { x: number; z: number }[];
   yaw?: number;
   pitch?: number;
   onArrive?: () => void;
   stuckFrames: number;
 }
 
-/** Controls handed from the 3D loop to the React buttons. */
+/** Controls handed from the 3D loop to React. */
 interface RoomApi {
-  visit(spot: Hotspot): void;
+  apply(config: RoomConfig, resolve: Resolver, editing: boolean): void;
+  visit(id: string): void;
+  setSelected(id: string | null): void;
   highlight(id: string | null): void;
 }
 
@@ -62,17 +68,24 @@ function leave() {
   window.location.assign(withBase('/'));
 }
 
-export function RoomCanvas() {
+export function RoomCanvas({ config, resolve, editor }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const apiRef = useRef<RoomApi | null>(null);
+  // The latest props, for the long-lived handlers inside the effect below.
+  const live = useRef({ config, resolve, editor });
+  live.current = { config, resolve, editor };
 
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [card, setCard] = useState<CardView | null>(null);
   const [showHint, setShowHint] = useState(true);
   const [ready, setReady] = useState(false);
   const [touch, setTouch] = useState(false);
+  const [items, setItems] = useState<{ id: string; label: string }[]>([]);
   // "unsupported": no WebGL at all. "lost": the browser took the 3D context away.
   const [problem, setProblem] = useState<null | 'unsupported' | 'lost'>(null);
+
+  /* -------------------- the renderer, the loop and the controls -------------------- */
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -89,51 +102,47 @@ export function RoomCanvas() {
     }
     renderer.setPixelRatio(1);
 
-    const room = buildRoom();
-    const crush = createCrushPass();
-    const target = new THREE.WebGLRenderTarget(SHORT_SIDE, SHORT_SIDE, {
+    let cfg = live.current.config;
+    let room: Room | null = null;
+    let crush: CrushPass | null = null;
+    let editing = false;
+    let seenRevision = -1;
+
+    const target = new THREE.WebGLRenderTarget(cfg.look.shortSide, cfg.look.shortSide, {
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
     });
-    crush.setSource(target.texture);
-
-    const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 30);
+    const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 40);
     camera.rotation.order = 'YXZ';
-
     const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
     // Where you are and where you are looking.
-    const pose = { x: START.x, z: START.z, yaw: START.yaw, pitch: START.pitch };
+    const pose = { x: 0, z: 0, yaw: 0, pitch: 0 };
     let walk: Walk | null = null;
     let walkPhase = 0;
     let lit = false;
-    // The place on the walls when the lights are on: whatever was last inspected.
-    let world: WorldId = DEFAULT_WORLD;
+    let world = cfg.worlds.defaultWorld;
     let hoverId: string | null = null;
+    let selectedId: string | null = null;
     const keys = new Set<string>();
 
-    try {
-      lit = window.localStorage.getItem(LIT_KEY) === '1';
-    } catch {
-      /* storage unavailable: start dark */
-    }
-    room.setState(lit, world, true);
+    const pitchLimit = () => THREE.MathUtils.degToRad(cfg.player.pitchLimit);
 
     /* ------------------------------- sizing ------------------------------ */
 
     const resize = () => {
+      const { shortSide, longSideMax } = cfg.look;
       const cw = canvas.clientWidth || 1;
       const ch = canvas.clientHeight || 1;
       const aspect = cw / ch;
-      const w = aspect >= 1 ? Math.min(LONG_SIDE_MAX, Math.round(SHORT_SIDE * aspect)) : SHORT_SIDE;
-      const h = aspect >= 1 ? SHORT_SIDE : Math.min(LONG_SIDE_MAX, Math.round(SHORT_SIDE / aspect));
+      const w = aspect >= 1 ? Math.min(longSideMax, Math.round(shortSide * aspect)) : shortSide;
+      const h = aspect >= 1 ? shortSide : Math.min(longSideMax, Math.round(shortSide / aspect));
       renderer.setSize(w, h, false);
       target.setSize(w, h);
       camera.aspect = aspect;
-      camera.fov = aspect >= 1 ? 62 : 78; // wider on a phone held upright
+      camera.fov = aspect >= 1 ? cfg.player.fov : cfg.player.fovPortrait;
       camera.updateProjectionMatrix();
     };
-    resize();
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(canvas);
 
@@ -142,14 +151,17 @@ export function RoomCanvas() {
     // The safety net under the route-finding: whatever moved you, you end up
     // inside the walls and outside the furniture.
     const keepInRoom = () => {
-      pose.x = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, pose.x));
-      pose.z = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, pose.z));
+      if (!room) return;
+      const { bounds, obstacles } = room.layout;
+      pose.x = Math.max(bounds.minX, Math.min(bounds.maxX, pose.x));
+      pose.z = Math.max(bounds.minZ, Math.min(bounds.maxZ, pose.z));
+      const r = cfg.room.bodyRadius;
       // Slide around furniture: push out along the shallowest side.
-      for (const [x0, x1, z0, z1] of OBSTACLES) {
-        const ax0 = x0 - ROOM.bodyRadius;
-        const ax1 = x1 + ROOM.bodyRadius;
-        const az0 = z0 - ROOM.bodyRadius;
-        const az1 = z1 + ROOM.bodyRadius;
+      for (const [x0, x1, z0, z1] of obstacles) {
+        const ax0 = x0 - r;
+        const ax1 = x1 + r;
+        const az0 = z0 - r;
+        const az1 = z1 + r;
         if (pose.x <= ax0 || pose.x >= ax1 || pose.z <= az0 || pose.z >= az1) continue;
         const pushes: [number, () => void][] = [
           [pose.x - ax0, () => (pose.x = ax0)],
@@ -162,10 +174,12 @@ export function RoomCanvas() {
       }
     };
 
-    const startWalk = (to: Point, then: Pick<Walk, 'yaw' | 'pitch' | 'onArrive'> = {}) => {
+    const startWalk = (to: { x: number; z: number }, then: Pick<Walk, 'yaw' | 'pitch' | 'onArrive'> = {}) => {
+      if (!room) return;
       setShowHint(false);
-      const path = navigator2d.route({ x: pose.x, z: pose.z }, to);
-      if (reducedMotionQuery.matches) {
+      setCard(null);
+      const path = room.layout.navigator.route({ x: pose.x, z: pose.z }, to);
+      if (reducedMotionQuery.matches || !cfg.player.glide) {
         // No gliding: arrive at once.
         const end = path[path.length - 1];
         pose.x = end.x;
@@ -180,7 +194,8 @@ export function RoomCanvas() {
       walk = { path, ...then, stuckFrames: 0 };
     };
 
-    const act = (spot: Hotspot) => {
+    const act = (spot: RuntimeHotspot) => {
+      if (!room) return;
       const action = spot.action;
       if (spot.world && spot.world !== world) {
         world = spot.world;
@@ -189,7 +204,7 @@ export function RoomCanvas() {
       if (action.type === 'toggle-light') {
         lit = !lit;
         room.setState(lit, world);
-        setMessage(lit ? 'Lights on.' : 'Lights off.');
+        setMessage(lit ? cfg.text.lightsOn : cfg.text.lightsOff);
         try {
           window.localStorage.setItem(LIT_KEY, lit ? '1' : '0');
         } catch {
@@ -197,23 +212,34 @@ export function RoomCanvas() {
         }
       } else if (action.type === 'exit') {
         leave();
-      } else {
-        setMessage(action.line);
+      } else if (action.type === 'inspect') {
+        if (action.line) setMessage(action.line);
+        if (spot.card) {
+          setCard({
+            title: spot.card.title,
+            text: spot.card.text,
+            imageUrl: live.current.resolve(spot.card.image),
+            link: spot.card.link,
+            linkLabel: spot.card.linkLabel,
+          });
+        }
       }
     };
 
     /** Walk up to an object, turn to face it, then use it. */
-    const visit = (spot: Hotspot) => {
+    const visit = (spot: RuntimeHotspot) => {
       const [sx, sz] = spot.stand;
       const dx = spot.center[0] - sx;
-      const dy = spot.center[1] - ROOM.eyeHeight;
+      const dy = spot.center[1] - cfg.room.eyeHeight;
       const dz = spot.center[2] - sz;
       setMessage(null);
+      live.current.editor?.onSelect(spot.id);
+      const limit = pitchLimit();
       startWalk(
         { x: sx, z: sz },
         {
           yaw: Math.atan2(-dx, -dz),
-          pitch: Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, Math.atan2(dy, Math.hypot(dx, dz)))),
+          pitch: Math.max(-limit, Math.min(limit, Math.atan2(dy, Math.hypot(dx, dz)))),
           onArrive: () => act(spot),
         },
       );
@@ -222,31 +248,83 @@ export function RoomCanvas() {
     const highlight = (id: string | null) => {
       if (id === hoverId) return;
       hoverId = id;
-      room.setHighlight(id);
+      room?.setHighlight(hoverId, selectedId);
       // The site's custom cursor grows over anything marked like this.
       canvas.dataset.cursorHover = id ? 'true' : 'false';
-      setHoverLabel(id ? (HOTSPOTS.find((h) => h.id === id)?.label ?? null) : null);
+      setHoverLabel(id ? (room?.layout.hotspots.find((h) => h.id === id)?.label ?? null) : null);
     };
 
-    apiRef.current = { visit, highlight };
+    /** Build (or rebuild) the room from a config, keeping where you are and where you look. */
+    const apply = (next: RoomConfig, resolver: Resolver, editMode: boolean) => {
+      const first = room === null;
+      const prev = cfg;
+      cfg = next;
+      editing = editMode;
+      room?.dispose();
+      crush?.dispose();
+      room = buildRoom(next, resolver, { editor: editMode });
+      crush = createCrushPass(next.look.palette, next.look.ditherStrength);
+      crush.setSource(target.texture);
+
+      if (first) {
+        let remembered = false;
+        try {
+          remembered = window.localStorage.getItem(LIT_KEY) === '1';
+        } catch {
+          /* storage unavailable: start dark */
+        }
+        lit = next.light.startLit === 'lit' || (next.light.startLit === 'remember' && remembered);
+        world = next.worlds.defaultWorld;
+      }
+      const p = next.player;
+      const moved =
+        first || p.startX !== prev.player.startX || p.startZ !== prev.player.startZ || p.startYaw !== prev.player.startYaw;
+      if (moved) {
+        pose.x = p.startX;
+        pose.z = p.startZ;
+        pose.yaw = THREE.MathUtils.degToRad(p.startYaw);
+        pose.pitch = 0;
+      }
+      pose.pitch = Math.max(-pitchLimit(), Math.min(pitchLimit(), pose.pitch));
+
+      walk = null;
+      seenRevision = -1;
+      room.setState(lit, world, true);
+      room.setHighlight(hoverId, selectedId);
+      resize();
+      keepInRoom();
+    };
+
+    apiRef.current = {
+      apply,
+      visit(id) {
+        const spot = room?.layout.hotspots.find((h) => h.id === id);
+        if (spot) visit(spot);
+      },
+      setSelected(id) {
+        selectedId = id;
+        room?.setHighlight(hoverId, selectedId);
+      },
+      highlight,
+    };
 
     /* ------------------------------ pointing ----------------------------- */
 
     const raycaster = new THREE.Raycaster();
     const pointerNdc = new THREE.Vector2();
-    const pickTargets: THREE.Object3D[] = [...room.hitVolumes, room.floor];
 
     const pick = (clientX: number, clientY: number) => {
+      if (!room) return null;
       const bounds = canvas.getBoundingClientRect();
       pointerNdc.set(
         ((clientX - bounds.left) / bounds.width) * 2 - 1,
         -((clientY - bounds.top) / bounds.height) * 2 + 1,
       );
       raycaster.setFromCamera(pointerNdc, camera);
-      const hit = raycaster.intersectObjects(pickTargets, false)[0];
+      const hit = raycaster.intersectObjects([...room.hitGroup.children, room.floor], false)[0];
       if (!hit) return null;
       const id = hit.object.userData.hotspotId as string | undefined;
-      const spot = id ? HOTSPOTS.find((h) => h.id === id) : undefined;
+      const spot = id ? room.layout.hotspots.find((h) => h.id === id) : undefined;
       return spot ? { spot } : { floor: hit.point };
     };
 
@@ -268,11 +346,9 @@ export function RoomCanvas() {
         }
         if (press.dragging) {
           // Drag the view like grabbing the scene.
-          pose.yaw += (e.clientX - press.lastX) * DRAG_LOOK;
-          pose.pitch = Math.max(
-            -PITCH_LIMIT,
-            Math.min(PITCH_LIMIT, pose.pitch + (e.clientY - press.lastY) * DRAG_LOOK),
-          );
+          const limit = pitchLimit();
+          pose.yaw += (e.clientX - press.lastX) * cfg.player.lookSpeed;
+          pose.pitch = Math.max(-limit, Math.min(limit, pose.pitch + (e.clientY - press.lastY) * cfg.player.lookSpeed));
         }
         press.lastX = e.clientX;
         press.lastY = e.clientY;
@@ -309,8 +385,12 @@ export function RoomCanvas() {
 
     const MOVE_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'];
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCard(null);
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (!MOVE_KEYS.includes(key) || e.metaKey || e.ctrlKey || e.altKey) return;
+      // Typing in the admin page's fields must not walk the camera.
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) return;
       e.preventDefault();
       keys.add(key);
       walk = null;
@@ -332,14 +412,22 @@ export function RoomCanvas() {
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
+      if (!room || !crush) return;
 
       // Standing still with nothing changing: no need for every frame.
       const active = walk !== null || keys.size > 0 || (press?.dragging ?? false) || room.busy() || !drawnOnce;
-      if (!active && now - last < IDLE_FRAME_MS) return;
+      if (!active && now - last < 1000 / cfg.look.idleFps) return;
 
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const reducedMotion = reducedMotionQuery.matches;
+      const player = cfg.player;
+
+      // Models and pictures arrive after the room is built, which changes what can be clicked.
+      if (room.layout.revision !== seenRevision) {
+        seenRevision = room.layout.revision;
+        setItems(room.layout.hotspots.map((h) => ({ id: h.id, label: h.label })));
+      }
 
       const beforeX = pose.x;
       const beforeZ = pose.z;
@@ -349,10 +437,10 @@ export function RoomCanvas() {
         (keys.has('ArrowLeft') || keys.has('a') ? 1 : 0) - (keys.has('ArrowRight') || keys.has('d') ? 1 : 0);
       const advance =
         (keys.has('ArrowUp') || keys.has('w') ? 1 : 0) - (keys.has('ArrowDown') || keys.has('s') ? 1 : 0);
-      pose.yaw += turn * KEY_TURN_SPEED * dt;
+      pose.yaw += turn * player.turnSpeed * dt;
       if (advance) {
-        pose.x += -Math.sin(pose.yaw) * advance * WALK_SPEED * dt;
-        pose.z += -Math.cos(pose.yaw) * advance * WALK_SPEED * dt;
+        pose.x += -Math.sin(pose.yaw) * advance * player.walkSpeed * dt;
+        pose.z += -Math.cos(pose.yaw) * advance * player.walkSpeed * dt;
       }
 
       if (walk) {
@@ -363,7 +451,7 @@ export function RoomCanvas() {
         const dist = Math.hypot(dx, dz);
         if (dist > 0.001) {
           // Full speed around corners; ease in only to the destination.
-          const speed = isLast ? Math.min(WALK_SPEED, dist * 4 + 0.5) : WALK_SPEED;
+          const speed = isLast ? Math.min(player.walkSpeed, dist * 4 + 0.5) : player.walkSpeed;
           const step = Math.min(dist, speed * dt);
           pose.x += (dx / dist) * step;
           pose.z += (dz / dist) * step;
@@ -399,9 +487,9 @@ export function RoomCanvas() {
       // A small bob while walking.
       const moved = Math.hypot(pose.x - beforeX, pose.z - beforeZ);
       if (moved > 0.0005 && !reducedMotion) walkPhase += moved * 5.5;
-      const bob = reducedMotion ? 0 : Math.sin(walkPhase) * 0.022;
+      const bob = reducedMotion ? 0 : Math.sin(walkPhase) * player.bob;
 
-      camera.position.set(pose.x, ROOM.eyeHeight + bob, pose.z);
+      camera.position.set(pose.x, cfg.room.eyeHeight + bob, pose.z);
       camera.rotation.set(pose.pitch, pose.yaw, 0);
 
       room.update(now / 1000, dt, reducedMotion);
@@ -426,6 +514,9 @@ export function RoomCanvas() {
     };
     canvas.addEventListener('webglcontextlost', onContextLost);
 
+    // Build the room for the first time.
+    apply(live.current.config, live.current.resolve, Boolean(live.current.editor));
+
     return () => {
       cancelAnimationFrame(raf);
       apiRef.current = null;
@@ -439,12 +530,38 @@ export function RoomCanvas() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
-      room.dispose();
-      crush.dispose();
+      room?.dispose();
+      crush?.dispose();
       target.dispose();
       renderer.dispose();
+      void editing;
     };
   }, []);
+
+  /* ------------------------ reacting to changes from outside ------------------------ */
+
+  const isEditing = Boolean(editor);
+  const selectedId = editor?.selectedId ?? null;
+  const visitRequest = editor?.visit ?? null;
+
+  // A new config (the admin page edited something): rebuild the room.
+  const firstApply = useRef(true);
+  useEffect(() => {
+    // The first build happens inside the effect above.
+    if (firstApply.current) {
+      firstApply.current = false;
+      return;
+    }
+    apiRef.current?.apply(config, resolve, isEditing);
+  }, [config, resolve, isEditing]);
+
+  useEffect(() => {
+    apiRef.current?.setSelected(selectedId);
+  }, [selectedId, config]);
+
+  useEffect(() => {
+    if (visitRequest) apiRef.current?.visit(visitRequest.id);
+  }, [visitRequest]);
 
   // Spoken lines fade on their own.
   useEffect(() => {
@@ -453,12 +570,13 @@ export function RoomCanvas() {
     return () => window.clearTimeout(id);
   }, [message]);
 
-  const hint = touch ? 'Tap to walk. Drag to look around.' : 'Click to walk. Drag to look around.';
+  const hint = touch ? config.text.hintTouch : config.text.hintMouse;
   const caption = message ?? hoverLabel ?? (showHint && ready ? hint : '');
+  const rootClass = editor ? 'absolute inset-0' : 'fixed inset-0';
 
   return (
-    <main className="fixed inset-0 select-none overflow-hidden bg-[#05060a] font-mono">
-      <h1 className="sr-only">Adine Johnson&apos;s room</h1>
+    <main className={`${rootClass} select-none overflow-hidden bg-[#05060a] font-mono`}>
+      {!editor && <h1 className="sr-only">Adine Johnson&apos;s room</h1>}
 
       <canvas
         ref={canvasRef}
@@ -469,7 +587,7 @@ export function RoomCanvas() {
 
       {!ready && !problem && (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm uppercase tracking-widest text-[#8a9a70]">
-          Loading the room…
+          {config.text.loading}
         </p>
       )}
 
@@ -490,44 +608,82 @@ export function RoomCanvas() {
                 Reload
               </button>
             )}
-            <button
-              type="button"
-              onClick={leave}
-              className="border border-[#2e3a1c] px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#c8d4a8]"
-            >
-              Standard site
-            </button>
+            {!editor && (
+              <button
+                type="button"
+                onClick={leave}
+                className="border border-[#2e3a1c] px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#c8d4a8]"
+              >
+                {config.text.standardSite}
+              </button>
+            )}
           </div>
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={leave}
-        className="absolute right-3 top-3 z-10 bg-[#05060a]/70 px-3 py-2 text-xs uppercase tracking-widest text-[#c8d4a8] transition-colors hover:text-[#f3f7e4]"
-      >
-        Standard site
-      </button>
+      {!editor && (
+        <button
+          type="button"
+          onClick={leave}
+          className="absolute right-3 top-3 z-10 bg-[#05060a]/70 px-3 py-2 text-xs uppercase tracking-widest text-[#c8d4a8] transition-colors hover:text-[#f3f7e4]"
+        >
+          {config.text.standardSite}
+        </button>
+      )}
 
       {/* The same objects as a list, for keyboards and screen readers. It is
           invisible, and ignores the mouse, until one of its buttons is focused. */}
-      <nav
-        aria-label="Things in the room"
-        className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[60%] flex-wrap gap-1 opacity-0 focus-within:pointer-events-auto focus-within:opacity-100"
-      >
-        {HOTSPOTS.map((spot) => (
+      {!editor && (
+        <nav
+          aria-label="Things in the room"
+          className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[60%] flex-wrap gap-1 opacity-0 focus-within:pointer-events-auto focus-within:opacity-100"
+        >
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => apiRef.current?.visit(item.id)}
+              onFocus={() => apiRef.current?.highlight(item.id)}
+              onBlur={() => apiRef.current?.highlight(null)}
+              className="bg-[#05060a]/80 px-2 py-1 text-xs text-[#c8d4a8]"
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {card && (
+        <aside
+          aria-label={card.title || 'About this'}
+          className="absolute bottom-16 left-3 right-3 z-20 max-h-[60%] max-w-sm overflow-y-auto border border-[#2e3a1c] bg-[#05060a]/92 p-4 text-[#f3f7e4] shadow-lg sm:right-auto"
+        >
           <button
-            key={spot.id}
             type="button"
-            onClick={() => apiRef.current?.visit(spot)}
-            onFocus={() => apiRef.current?.highlight(spot.id)}
-            onBlur={() => apiRef.current?.highlight(null)}
-            className="bg-[#05060a]/80 px-2 py-1 text-xs text-[#c8d4a8]"
+            onClick={() => setCard(null)}
+            aria-label="Close"
+            className="absolute right-2 top-2 px-2 py-1 text-sm text-[#c8d4a8] hover:text-[#f3f7e4]"
           >
-            {spot.label}
+            ✕
           </button>
-        ))}
-      </nav>
+          {card.imageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={card.imageUrl} alt="" className="mb-3 max-h-48 w-full object-cover" />
+          )}
+          {card.title && <h2 className="pr-8 text-lg font-bold tracking-tight">{card.title}</h2>}
+          {card.text && <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[#c8d4a8]">{card.text}</p>}
+          {card.link && (
+            <a
+              href={card.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-block border border-[#94a348] bg-[#94a348] px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#0a0c04] hover:bg-[#c8d4a8]"
+            >
+              {card.linkLabel || 'Open'}
+            </a>
+          )}
+        </aside>
+      )}
 
       <p
         aria-live="polite"

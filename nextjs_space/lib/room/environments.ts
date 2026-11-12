@@ -5,6 +5,8 @@
 // `image`, that photo replaces the drawing as soon as it has loaded. Photos
 // live in public/images/room/ and are 2080 x 240 pixels (see CREDITS.txt).
 
+import type { BuiltinWorldId } from './config';
+
 type Ctx = CanvasRenderingContext2D;
 
 /** Size the code-drawn panoramas are drawn at: 26 m of wall by 3 m high, at 40 px per metre. */
@@ -12,7 +14,7 @@ export const PANORAMA = { w: 1040, h: 120 };
 /** Wall textures are twice that, to match the photos. */
 export const PANORAMA_SCALE = 2;
 
-export type WorldId = 'nebula' | 'forest' | 'sunset' | 'city';
+export type WorldId = BuiltinWorldId;
 
 export interface Environment {
   id: WorldId;
@@ -26,11 +28,6 @@ export interface Environment {
   /** Site-relative path to a panorama photo. */
   image?: string;
 }
-
-/** What the walls show with the lights off. */
-export const DARK_WORLD: WorldId = 'nebula';
-/** What they show with the lights on, before anything has been inspected. */
-export const DEFAULT_WORLD: WorldId = 'forest';
 
 const { w: W, h: H } = PANORAMA;
 
@@ -195,11 +192,13 @@ export const ENVIRONMENTS: Record<WorldId, Environment> = {
 };
 
 /**
- * A colour multiplier for the visitor's local time, so the world on the
- * walls keeps the hours they do. Returned as linear r, g, b.
+ * A colour multiplier for the time of day (the visitor's local time unless
+ * `hour` is given), so the world on the walls keeps the hours they do.
+ * Returned as linear r, g, b.
  */
-export function timeOfDayTint(date = new Date()): [number, number, number] {
-  const h = date.getHours() + date.getMinutes() / 60;
+export function timeOfDayTint(hour?: number): [number, number, number] {
+  const now = new Date();
+  const h = hour ?? now.getHours() + now.getMinutes() / 60;
   const night: [number, number, number] = [0.3, 0.36, 0.62];
   const dawn: [number, number, number] = [1.0, 0.8, 0.68];
   const day: [number, number, number] = [1, 1, 1];

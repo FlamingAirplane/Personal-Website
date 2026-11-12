@@ -29,7 +29,7 @@ Each finding below has a status:
 - **Needs you**: only you can supply it (a file, a link, a decision).
 - **Left alone**: a deliberate choice not to change it, with the reason.
 
-Totals: 52 fixed, 8 need you, 8 left alone.
+Totals: 53 fixed, 8 need you, 7 left alone.
 
 ---
 
@@ -106,7 +106,7 @@ Totals: 52 fixed, 8 need you, 8 left alone.
 | R3 | On very wide screens the room's pixels stretched sideways, because its width was capped. | Raised the cap. | Fixed |
 | R4 | Every box in the room created its own copy of its colour, several hundred in all. | Colours are shared. | Fixed |
 | R5 | If the browser dropped the 3D context (it can on phones under memory pressure) the room froze silently. | It now says what happened and offers a reload. | Fixed |
-| R6 | The object-to-place pairings on the walls are placeholders. | Unchanged; they will come from each project in a later phase. | Left alone |
+| R6 | The object-to-place pairings on the walls are placeholders. | Every pairing can now be changed, and each item can have its own background picture, from the room admin page (`/room/admin/`). The defaults are still placeholders. | Fixed |
 | R7 | The room has no sound. | Out of scope for this pass. | Left alone |
 
 ## Project health

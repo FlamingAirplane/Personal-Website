@@ -3,13 +3,11 @@
 // with ordered (Bayer) dithering.
 
 import * as THREE from 'three';
-import { PALETTE_HEX } from './palette';
-
-const fragmentShader = /* glsl */ `
+const fragmentShader = (count: number) => /* glsl */ `
   precision highp float;
 
   uniform sampler2D tScene;
-  uniform vec3 uPalette[${PALETTE_HEX.length}];
+  uniform vec3 uPalette[${count}];
   uniform float uDither;
   varying vec2 vUv;
 
@@ -30,7 +28,7 @@ const fragmentShader = /* glsl */ `
 
     vec3 best = uPalette[0];
     float bestDist = 1e9;
-    for (int i = 0; i < ${PALETTE_HEX.length}; i++) {
+    for (int i = 0; i < ${count}; i++) {
       vec3 d = color - uPalette[i];
       // Weighted towards how the eye sees brightness.
       float dist = dot(d * d, vec3(3.0, 4.0, 2.0));
@@ -58,10 +56,10 @@ export interface CrushPass {
   dispose(): void;
 }
 
-export function createCrushPass(): CrushPass {
+export function createCrushPass(paletteHex: readonly string[], dither: number): CrushPass {
   // Raw 0..1 screen-colour values; deliberately not THREE.Color, which
   // would convert them to linear light.
-  const palette = PALETTE_HEX.map(
+  const palette = paletteHex.map(
     (hex) =>
       new THREE.Vector3(
         parseInt(hex.slice(1, 3), 16) / 255,
@@ -74,10 +72,10 @@ export function createCrushPass(): CrushPass {
     uniforms: {
       tScene: { value: null },
       uPalette: { value: palette },
-      uDither: { value: 2 },
+      uDither: { value: dither },
     },
     vertexShader,
-    fragmentShader,
+    fragmentShader: fragmentShader(paletteHex.length),
     depthTest: false,
     depthWrite: false,
   });

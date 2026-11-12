@@ -1,5 +1,6 @@
 'use client';
 
+import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 const SETTINGS = {
@@ -21,8 +22,15 @@ export function CustomCursor() {
   const [color, setColor] = useState('#94a348');
   const [isHovering, setIsHovering] = useState(false);
   const [visible, setVisible] = useState(false);
+  // The admin page is full of forms, where a normal pointer is easier to use.
+  const pathname = usePathname();
+  const disabled = pathname?.startsWith('/room/admin') ?? false;
 
   useEffect(() => {
+    if (disabled) {
+      setVisible(false);
+      return;
+    }
     const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     if (isTouchDevice) return;
 
@@ -81,9 +89,9 @@ export function CustomCursor() {
       document.removeEventListener('mouseleave', onMouseLeave);
       cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [disabled]);
 
-  if (!visible) return null;
+  if (!visible || disabled) return null;
 
   const dotSize = isHovering ? SETTINGS.hoverSize : SETTINGS.size;
 

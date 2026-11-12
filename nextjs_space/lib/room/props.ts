@@ -42,6 +42,11 @@ export interface Kit {
   ): THREE.Mesh;
   /** Register something to be freed when the room is torn down. */
   track(disposable: { dispose(): void }): void;
+  /** Start building the object called `id`: everything made until end() belongs to it. */
+  begin(id: string): void;
+  end(): void;
+  /** Add something straight to the object being built. */
+  add(...objects: THREE.Object3D[]): void;
 }
 
 export interface Props {
@@ -61,7 +66,7 @@ function hash(n: number) {
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
 export function addProps(kit: Kit): Props {
-  const { scene, lambert, glow, box, beam, rod, disc } = kit;
+  const { lambert, glow, box, beam, rod, disc, begin, end, add } = kit;
 
   const wood = lambert('#7a4a30');
   const darkWood = lambert('#4d2f22');
@@ -75,6 +80,7 @@ export function addProps(kit: Kit): Props {
   const southZ = HALF_D;
 
   /* ------------------------------- bookcase ------------------------------ */
+  begin('bookcase');
   // Floor-standing, against the east wall, north of the desk.
 
   const BC = { z: -2.15, width: 1.0, depth: 0.32, height: 1.9 };
@@ -145,12 +151,15 @@ export function addProps(kit: Kit): Props {
   box(lambert('#94a348'), 0.09, 0.07, 0.09, bcX, BC.height + 0.12, BC.z + 0.25);
   box(lambert('#5a6a40'), 0.05, 0.06, 0.05, bcX, BC.height + 0.18, BC.z + 0.25);
 
+  end();
+
   /* ------------------------- desk: chair, speakers ------------------------ */
 
+  begin('chair');
   const chair = new THREE.Group();
   chair.position.set(2.42, 0, 0.1);
   chair.rotation.y = 0.3; // left slightly turned, as if someone just stood up
-  scene.add(chair);
+  add(chair);
   const fabric = lambert('#2e3a1c');
   box(black, 0.52, 0.04, 0.06, 0, 0.04, 0, chair); // star base
   box(black, 0.06, 0.04, 0.52, 0, 0.04, 0, chair);
@@ -162,7 +171,10 @@ export function addProps(kit: Kit): Props {
     box(black, 0.28, 0.03, 0.06, 0, 0.68, z, chair); // armrest
   }
 
+  end();
+
   // Studio monitor speakers either side of the screen.
+  begin('speakers');
   const DESK_TOP = ROOM.deskTop;
   for (const z of [-0.5, 0.5]) {
     box(black, 0.24, 0.3, 0.19, eastX - 0.2, DESK_TOP + 0.15, z);
@@ -171,7 +183,10 @@ export function addProps(kit: Kit): Props {
     box(glow('#7fd4d8'), 0.006, 0.012, 0.012, eastX - 0.323, DESK_TOP + 0.03, z + 0.07); // power light
   }
 
+  end();
+
   /* --------------------- couch, facing the cinema screen ------------------ */
+  begin('couch');
 
   const couch = lambert('#2e2a6b');
   const cushion = lambert('#4a3a8c');
@@ -190,7 +205,10 @@ export function addProps(kit: Kit): Props {
   box(lambert('#f07a5a'), 0.02, 0.012, 0.02, -1.775, 0.5, 0.41);
   box(lambert('#94a348'), 0.02, 0.012, 0.02, -1.775, 0.5, 0.31);
 
+  end();
+
   /* ---------------------------------- rug --------------------------------- */
+  begin('rug');
 
   const rugCanvas = document.createElement('canvas');
   rugCanvas.width = 52;
@@ -227,7 +245,10 @@ export function addProps(kit: Kit): Props {
   kit.track(rugMaterial);
   box(rugMaterial, 2.6, 0.012, 1.9, 0.2, 0.006, 0.1);
 
+  end();
+
   /* ----------------- plant and watering can (Digital Nature) -------------- */
+  begin('plant');
 
   const POT_X = -2.3;
   const POT_Z = northZ + 0.38;
@@ -240,7 +261,7 @@ export function addProps(kit: Kit): Props {
     const leaf = new THREE.Group();
     leaf.position.set(POT_X, 0.5 + i * 0.07, POT_Z);
     leaf.rotation.y = i * 2.4; // spiral up the stem
-    scene.add(leaf);
+    add(leaf);
     const blade = box(lambert(leafColors[i % 3]), 0.3 - i * 0.018, 0.012, 0.12 - i * 0.006, 0.17 - i * 0.008, 0.04, 0, leaf);
     blade.rotation.z = 0.45;
   }
@@ -252,7 +273,10 @@ export function addProps(kit: Kit): Props {
   beam(greyLight, 0.02, v(CAN_X - 0.09, 0.19, POT_Z), v(CAN_X - 0.21, 0.13, POT_Z)); // handle
   beam(greyLight, 0.02, v(CAN_X - 0.21, 0.13, POT_Z), v(CAN_X - 0.1, 0.03, POT_Z));
 
+  end();
+
   /* -------------- record player on a cabinet, crate of records ------------ */
+  begin('record-player');
 
   const CAB_Z = northZ + 0.26;
   const CAB_TOP = 0.62;
@@ -276,7 +300,7 @@ export function addProps(kit: Kit): Props {
   disc(greyMid, 0.034, 0.03, LAVA_X, CAB_TOP + 0.265, CAB_Z);
   const lavaLight = new THREE.PointLight('#b8405a', 0, 0, 2);
   lavaLight.position.set(LAVA_X, CAB_TOP + 0.25, CAB_Z + 0.3);
-  scene.add(lavaLight);
+  add(lavaLight);
 
   // Crate of records on the floor beside it.
   const CRATE_X = 0.88;
@@ -285,7 +309,10 @@ export function addProps(kit: Kit): Props {
     box(lambert(SPINES[(i * 5 + 2) % SPINES.length]), 0.3, 0.31, 0.014, CRATE_X, 0.2, CAB_Z - 0.13 + i * 0.043);
   }
 
+  end();
+
   /* ------------------------------ whiteboard ------------------------------ */
+  begin('whiteboard');
   // On a wheeled stand by the south wall, facing into the room.
 
   const WB_X = -0.8;
@@ -312,6 +339,8 @@ export function addProps(kit: Kit): Props {
   line(WB_X - 0.34, 1.3, 0.28);
   line(WB_X + 0.05, 1.14, 0.9);
   box(lambert('#b8405a'), 0.2, 0.016, 0.004, WB_X - 0.38, 1.06, ink);
+
+  end();
 
   return {
     setLit(lit) {
