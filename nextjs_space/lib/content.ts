@@ -120,35 +120,62 @@ function bySortOrder<T extends { sortOrder?: number }>(items: T[]): T[] {
     .map(({ item }) => item);
 }
 
-export const profile: Profile = {
-  ...content.profile,
-  imageUrl: withBase(content.profile.imageUrl),
-  heroBgUrl: withBase(content.profile.heroBgUrl),
-};
+/** The site's content with every image path turned into an address the browser can load. */
+export interface ResolvedContent {
+  profile: Profile;
+  siteSettings: SiteSettings;
+  portfolioItems: PortfolioItem[];
+  workHistory: WorkHistoryItem[];
+}
 
-export const siteSettings: SiteSettings = content.siteSettings;
+function resolveGallery(galleryImages: string | undefined, asset: (path: string) => string): string | undefined {
+  if (!galleryImages) return galleryImages;
+  try {
+    const list = JSON.parse(galleryImages);
+    return Array.isArray(list) ? JSON.stringify(list.filter((x) => typeof x === 'string').map(asset)) : '[]';
+  } catch {
+    return '[]';
+  }
+}
 
 // A project with a youtubeUrl gets its thumbnail as the cover (unless it has its own
 // image) and the video as its link (unless it has its own link).
-export const portfolioItems: PortfolioItem[] = bySortOrder(content.portfolioItems).map((item) => ({
-  ...item,
-  imageUrl: withBase(item.imageUrl || youtubeThumbnail(item.youtubeUrl)),
-  projectLink:
-    item.projectLink && item.projectLink !== '#' ? item.projectLink : item.youtubeUrl || item.projectLink,
-}));
+export function resolveContent(raw: SiteContent, asset: (path: string) => string = withBase): ResolvedContent {
+  return {
+    profile: {
+      ...raw.profile,
+      imageUrl: asset(raw.profile.imageUrl),
+      heroBgUrl: asset(raw.profile.heroBgUrl),
+      resumeUrl: raw.profile.resumeUrl ? asset(raw.profile.resumeUrl) : '',
+    },
+    siteSettings: raw.siteSettings,
+    portfolioItems: bySortOrder(raw.portfolioItems).map((item) => ({
+      ...item,
+      imageUrl: asset(item.imageUrl || youtubeThumbnail(item.youtubeUrl)),
+      projectLink:
+        item.projectLink && item.projectLink !== '#' ? item.projectLink : item.youtubeUrl || item.projectLink,
+      galleryImages: resolveGallery(item.galleryImages, asset),
+    })),
+    workHistory: bySortOrder(raw.workHistory),
+  };
+}
 
-export const workHistory: WorkHistoryItem[] = bySortOrder(content.workHistory);
+export const published: ResolvedContent = resolveContent(content);
+export const profile: Profile = published.profile;
+export const siteSettings: SiteSettings = published.siteSettings;
+export const portfolioItems: PortfolioItem[] = published.portfolioItems;
+export const workHistory: WorkHistoryItem[] = published.workHistory;
 
 /** True when a project has something to show beyond its card. */
 export function hasProjectPageContent(item: PortfolioItem): boolean {
   return Boolean(item.subpageContent?.trim()) || parseGallery(item).length > 0;
 }
 
-/** The gallery image paths of a project, already prefixed for the site's address. */
+/** The gallery image addresses of a resolved project. */
 export function parseGallery(item: PortfolioItem): string[] {
   try {
     const list = JSON.parse(item.galleryImages || '[]');
-    return Array.isArray(list) ? list.filter((x) => typeof x === 'string').map(withBase) : [];
+    return Array.isArray(list) ? list.filter((x) => typeof x === 'string') : [];
   } catch {
     return [];
   }

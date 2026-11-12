@@ -1,5 +1,5 @@
 import { Briefcase, FileText, Gamepad2, Home, Music, User, type LucideIcon } from 'lucide-react';
-import { hasResumeSection, profile } from '@/lib/content';
+import { hasResumeSection, type Profile } from '@/lib/content';
 
 export interface NavItem {
   /** The id of the section on the home page; the link is "#<id>". */
@@ -18,6 +18,6 @@ const ALL_ITEMS: NavItem[] = [
 ];
 
 /** The sections of the home page, in order. Resume is left out while it is empty. */
-export const NAV_ITEMS: NavItem[] = ALL_ITEMS.filter(
-  (item) => item.id !== 'contact' || hasResumeSection(profile),
-);
+export function navItems(profile: Profile): NavItem[] {
+  return ALL_ITEMS.filter((item) => item.id !== 'contact' || hasResumeSection(profile));
+}

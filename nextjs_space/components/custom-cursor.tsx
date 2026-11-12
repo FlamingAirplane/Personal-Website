@@ -1,18 +1,21 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { siteSettings } from '@/lib/content';
+import type { SiteSettings } from '@/lib/content';
+import { useSiteContent } from '@/lib/preview';
 
 // Set from the admin page (Title, Particles & Cursor).
-const SETTINGS = {
-  enabled: siteSettings.cursorEnabled,
-  size: siteSettings.cursorSize,
-  hoverSize: siteSettings.cursorHoverSize,
-  /** How quickly the dot catches up with the pointer, per frame (0..1). */
-  lag: siteSettings.cursorLag / 100,
-  colorOnLight: siteSettings.cursorColorLight,
-  colorOnDark: siteSettings.cursorColorDark,
-};
+function cursorSettings(s: SiteSettings) {
+  return {
+    enabled: s.cursorEnabled,
+    size: s.cursorSize,
+    hoverSize: s.cursorHoverSize,
+    /** How quickly the dot catches up with the pointer, per frame (0..1). */
+    lag: s.cursorLag / 100,
+    colorOnLight: s.cursorColorLight,
+    colorOnDark: s.cursorColorDark,
+  };
+}
 
 // Anything matching this makes the dot grow. The room's canvas sets
 // data-cursor-hover="true" on itself while the pointer is over an object.
@@ -24,10 +27,16 @@ export function CustomCursor() {
   const [color, setColor] = useState('#94a348');
   const [isHovering, setIsHovering] = useState(false);
   const [visible, setVisible] = useState(false);
+  const SETTINGS = cursorSettings(useSiteContent().siteSettings);
+  const settingsRef = useRef(SETTINGS);
+  settingsRef.current = SETTINGS;
 
   useEffect(() => {
     const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    if (!SETTINGS.enabled || isTouchDevice) return;
+    if (!SETTINGS.enabled || isTouchDevice) {
+      setVisible(false);
+      return;
+    }
 
     setVisible(true);
 
@@ -56,7 +65,7 @@ export function CustomCursor() {
         const match = bg.match(/\d+/g);
         if (match && match.length >= 3) {
           const luminance = (0.299 * +match[0] + 0.587 * +match[1] + 0.114 * +match[2]) / 255;
-          setColor(luminance > 0.5 ? SETTINGS.colorOnLight : SETTINGS.colorOnDark);
+          setColor(luminance > 0.5 ? settingsRef.current.colorOnLight : settingsRef.current.colorOnDark);
         }
       }
       setIsHovering(Boolean(el.closest(INTERACTIVE)));
@@ -67,8 +76,8 @@ export function CustomCursor() {
         moved = false;
         inspect();
       }
-      pos.x += (target.x - pos.x) * SETTINGS.lag;
-      pos.y += (target.y - pos.y) * SETTINGS.lag;
+      pos.x += (target.x - pos.x) * settingsRef.current.lag;
+      pos.y += (target.y - pos.y) * settingsRef.current.lag;
       if (dotRef.current) {
         dotRef.current.style.transform = `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%)`;
       }
@@ -84,7 +93,7 @@ export function CustomCursor() {
       document.removeEventListener('mouseleave', onMouseLeave);
       cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [SETTINGS.enabled]);
 
   if (!visible) return null;
 

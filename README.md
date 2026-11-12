@@ -17,9 +17,11 @@ Everything written on the site lives in one data file:
 (profile, projects, jobs, and the title/particle/cursor settings).
 
 **Easiest way: the admin page** at `/Personal-Website/admin/`. It has tabs for
-Games, Sound, Work, Profile & Resume, and Title/Particles/Cursor. Saving commits
-the change to `main` through the GitHub API and the site republishes in about a
-minute.
+Games, Sound, Work, Profile & Resume, and Title/Particles/Cursor. Saving puts a
+change in your draft (kept in the browser). **Preview** opens the real site with
+the draft in a new tab, and it updates as you save. **Publish** commits the draft
+to `main` through the GitHub API and the site republishes in about a minute;
+**Discard** throws the draft away.
 
 To sign in, paste a fine-grained GitHub token. Create one at
 <https://github.com/settings/personal-access-tokens/new>, limited to the

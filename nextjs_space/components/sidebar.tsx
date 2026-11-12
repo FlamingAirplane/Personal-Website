@@ -1,15 +1,17 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { profile } from '@/lib/content';
+import { useSiteContent } from '@/lib/preview';
 import { EnterRoomLink } from './mode-gate';
-import { NAV_ITEMS } from './nav-items';
+import { navItems } from './nav-items';
 
 interface SidebarProps {
   activeSection: string;
 }
 
 export function Sidebar({ activeSection }: SidebarProps) {
+  const { profile } = useSiteContent();
+  const NAV_ITEMS = navItems(profile);
   return (
     <motion.aside
       initial={{ x: -200 }}

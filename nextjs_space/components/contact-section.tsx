@@ -3,7 +3,6 @@
 import { motion } from 'framer-motion';
 import { useInView } from 'react-intersection-observer';
 import { FileText } from 'lucide-react';
-import { withBase } from '@/lib/site';
 
 interface Props {
   profile: any;
@@ -43,7 +42,7 @@ export function ContactSection({ profile }: Props) {
             </p>
             {resumeUrl ? (
               <a
-                href={withBase(resumeUrl)}
+                href={resumeUrl}
                 download="Adine_Johnson_Resume.pdf"
                 className="flex items-center gap-2 px-5 py-3 bg-[#94a348] text-[#0a0c04] font-semibold rounded-lg hover:bg-[#a8b850] transition-colors w-full justify-center"
               >

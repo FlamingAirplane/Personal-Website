@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { siteSettings } from '@/lib/content';
+import type { SiteSettings } from '@/lib/content';
+import { useSiteContent } from '@/lib/preview';
 
 interface Particle {
   x: number;
@@ -27,13 +28,15 @@ interface ParticleSettings {
 }
 
 // Set from the admin page (Title, Particles & Cursor). Percentages are stored as whole numbers.
-const DEFAULT_SETTINGS: Omit<ParticleSettings, 'titleText'> = {
-  mouseRadius: siteSettings.particleMouseRadius,
-  pushForce: siteSettings.particlePushForce,
-  returnSpeed: siteSettings.particleReturnSpeed / 100,
-  friction: siteSettings.particleFriction / 100,
-  gap: siteSettings.particleGap,
-};
+function particleSettings(s: SiteSettings): Omit<ParticleSettings, 'titleText'> {
+  return {
+    mouseRadius: s.particleMouseRadius,
+    pushForce: s.particlePushForce,
+    returnSpeed: s.particleReturnSpeed / 100,
+    friction: s.particleFriction / 100,
+    gap: s.particleGap,
+  };
+}
 
 /**
  * The big title, drawn as a cloud of dots that scatter away from the pointer.
@@ -41,8 +44,9 @@ const DEFAULT_SETTINGS: Omit<ParticleSettings, 'titleText'> = {
  */
 export function PointCloudTitle({ text }: { text: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const settingsRef = useRef<ParticleSettings>({ ...DEFAULT_SETTINGS, titleText: text });
-  settingsRef.current.titleText = text;
+  const { siteSettings } = useSiteContent();
+  const settingsRef = useRef<ParticleSettings>({ ...particleSettings(siteSettings), titleText: text });
+  Object.assign(settingsRef.current, particleSettings(siteSettings), { titleText: text });
 
   useEffect(() => {
     const canvas = canvasRef.current;

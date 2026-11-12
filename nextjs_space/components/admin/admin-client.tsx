@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Briefcase, Gamepad2, Loader2, LogOut, Music, Plus, SlidersVertical, User } from 'lucide-react';
+import { ArrowLeft, Briefcase, Eye, Gamepad2, Loader2, LogOut, Music, Plus, SlidersVertical, Undo2, Upload, User } from 'lucide-react';
 import type { PortfolioItem, Profile, SiteContent, SiteSettings, WorkHistoryItem } from '@/lib/content';
 import {
   ACTIONS_URL,
@@ -13,6 +13,7 @@ import {
   saveContent,
   uploadFile,
 } from '@/lib/github-content';
+import { PREVIEW_PATH, readDraft, writeDraft } from '@/lib/preview';
 import { withBase } from '@/lib/site';
 import { LoginCard } from './login-card';
 import { PRIMARY_BUTTON, type Previewer, type Uploader } from './fields';
@@ -54,7 +55,11 @@ function firstSortOrder(items: { sortOrder?: number }[]): number {
 /** The admin dashboard: edits site-content.json on GitHub, which republishes the site. */
 export function AdminClient() {
   const [token, setToken] = useState('');
+  const [published, setPublished] = useState<SiteContent | null>(null);
+  const [publishedSha, setPublishedSha] = useState('');
   const [content, setContent] = useState<SiteContent | null>(null);
+  const [baseSha, setBaseSha] = useState('');
+  const [changes, setChanges] = useState<string[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -69,6 +74,7 @@ export function AdminClient() {
   const disconnect = useCallback(() => {
     rememberToken('');
     setToken('');
+    setPublished(null);
     setContent(null);
     setProject(null);
     setWork(null);
@@ -89,9 +95,14 @@ export function AdminClient() {
       try {
         await checkToken(candidate);
         const loaded = await loadContent(candidate);
+        const stored = readDraft();
         rememberToken(candidate);
         setToken(candidate);
-        setContent(loaded.content);
+        setPublished(loaded.content);
+        setPublishedSha(loaded.sha);
+        setContent(stored?.content ?? loaded.content);
+        setBaseSha(stored?.baseSha ?? loaded.sha);
+        if (stored) setNotice({ kind: 'ok', text: 'Your unpublished draft from last time is back. Preview it, then Publish.' });
       } catch (error) {
         fail(error);
       } finally {
@@ -106,23 +117,58 @@ export function AdminClient() {
     if (saved) void connect(saved);
   }, [connect]);
 
-  /** Applies a change on top of the newest content on GitHub and commits it. */
+  /** Applies a change to the draft. Nothing reaches the site until Publish. */
   async function commit(change: (current: SiteContent) => SiteContent, message: string): Promise<boolean> {
+    if (!content || !published) return false;
+    const next = change(content);
+    const isPublished = JSON.stringify(next) === JSON.stringify(published);
+    setContent(next);
+    writeDraft(isPublished ? null : { content: next, baseSha });
+    setChanges((list) => (isPublished ? [] : [...list, message.replace(/^Admin: /, '')]));
+    setNotice({ kind: 'ok', text: 'Saved to your draft. Preview it, then Publish to put it on the site.' });
+    return true;
+  }
+
+  async function publish() {
+    if (!content) return;
     setBusy(true);
     setNotice(null);
     try {
       const latest = await loadContent(token);
-      const next = change(latest.content);
-      await saveContent(token, next, latest.sha, message);
-      setContent(next);
-      setNotice({ kind: 'ok', text: 'Saved to GitHub. The site republishes in about a minute.' });
-      return true;
+      if (
+        latest.sha !== baseSha &&
+        !window.confirm('The content on GitHub changed after you started this draft. Publishing replaces it with your draft. Continue?')
+      ) {
+        return;
+      }
+      const summary = changes.length ? `\n\n${changes.map((c) => `- ${c}`).join('\n')}` : '';
+      const sha = await saveContent(token, content, latest.sha, `Admin: publish changes${summary}`);
+      setPublished(content);
+      setPublishedSha(sha);
+      setBaseSha(sha);
+      setChanges([]);
+      writeDraft(null);
+      setNotice({ kind: 'ok', text: 'Published to GitHub. The site republishes in about a minute.' });
     } catch (error) {
       fail(error);
-      return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  function discard() {
+    if (!published || !window.confirm('Throw away all unpublished changes?')) return;
+    setContent(published);
+    setBaseSha(publishedSha);
+    setChanges([]);
+    setProject(null);
+    setWork(null);
+    writeDraft(null);
+    setNotice({ kind: 'ok', text: 'Draft discarded.' });
+  }
+
+  function openPreview() {
+    window.open(withBase(PREVIEW_PATH), 'admin-preview');
   }
 
   const upload: Uploader = async (file) => {
@@ -139,7 +185,7 @@ export function AdminClient() {
       const blob = isImage ? await prepareImage(file) : file;
       const path = await uploadFile(token, blob, file.name);
       previews.current.set(path, URL.createObjectURL(blob));
-      setNotice({ kind: 'ok', text: 'Uploaded. It goes live with the next save.' });
+      setNotice({ kind: 'ok', text: 'Uploaded. Save to add it to your draft.' });
       return path;
     } catch (error) {
       fail(error);
@@ -250,6 +296,7 @@ export function AdminClient() {
   }
 
   const canAdd = (tab === 'game' || tab === 'sound' || tab === 'work') && !project && !work;
+  const dirty = JSON.stringify(content) !== JSON.stringify(published);
 
   return (
     <div className="min-h-screen bg-[#0a0c04] text-[#f3f7e4]">
@@ -267,6 +314,9 @@ export function AdminClient() {
                 <Plus size={16} /> {tab === 'work' ? 'Add Work Entry' : 'Add Project'}
               </button>
             )}
+            <button type="button" onClick={openPreview} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-[#1a2e38] text-[#c8d4a8] hover:bg-[#1a2e38]/80" title="See the site with your draft">
+              <Eye size={16} /> Preview
+            </button>
             <button type="button" onClick={disconnect} className="p-2 rounded-lg hover:bg-[#1a1e10] text-[#c8d4a8]" aria-label="Disconnect from GitHub" title="Disconnect from GitHub">
               <LogOut size={18} />
             </button>
@@ -290,6 +340,25 @@ export function AdminClient() {
           ))}
         </div>
 
+        {dirty && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#94a348]/50 bg-[#94a348]/10 px-4 py-3 text-sm">
+            <span className="text-[#c8d4a8]">
+              You have unpublished changes{changes.length ? ` (${changes.length})` : ''}. Preview them, then Publish.
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={openPreview} className="flex items-center gap-2 px-3 py-2 rounded-lg font-semibold bg-[#1a2e38] text-[#c8d4a8] hover:bg-[#1a2e38]/80">
+                <Eye size={16} /> Preview
+              </button>
+              <button type="button" onClick={discard} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg font-semibold bg-[#1a2e38] text-[#c8d4a8] hover:bg-[#1a2e38]/80 disabled:opacity-50">
+                <Undo2 size={16} /> Discard
+              </button>
+              <button type="button" onClick={publish} disabled={busy} className={PRIMARY_BUTTON}>
+                <Upload size={16} /> Publish
+              </button>
+            </div>
+          </div>
+        )}
+
         {notice && (
           <p
             role={notice.kind === 'error' ? 'alert' : 'status'}
@@ -305,7 +374,7 @@ export function AdminClient() {
         )}
         {busy && (
           <div className="flex items-center gap-2 mb-4 text-sm text-[#8a9a70]">
-            <Loader2 size={16} className="animate-spin" /> Saving to GitHub...
+            <Loader2 size={16} className="animate-spin" /> Publishing to GitHub...
           </div>
         )}
 

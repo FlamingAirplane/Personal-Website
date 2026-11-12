@@ -1,5 +1,7 @@
+'use client';
+
 import { Briefcase, Gamepad2, Music, User } from 'lucide-react';
-import { profile } from '@/lib/content';
+import { useSiteContent } from '@/lib/preview';
 
 const LINKS = [
   { id: 'game-portfolio', label: 'Games', icon: Gamepad2 },
@@ -9,6 +11,7 @@ const LINKS = [
 ];
 
 export function FooterSection() {
+  const { profile } = useSiteContent();
   return (
     <footer className="border-t border-[#1a1e10] bg-[#0a0c04]">
       <div className="max-w-5xl mx-auto px-6 py-8">

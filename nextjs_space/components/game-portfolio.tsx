@@ -7,6 +7,7 @@ import { useInView } from 'react-intersection-observer';
 import { Gamepad2, ExternalLink, Calendar, ArrowRight } from 'lucide-react';
 import { useState } from 'react';
 import { hasProjectPageContent } from '@/lib/content';
+import { useSiteLinks } from '@/lib/preview';
 import { TiltCard } from './tilt-card';
 
 interface Props {
@@ -46,6 +47,7 @@ export function GamePortfolio({ items }: Props) {
 
 function PortfolioCard({ item, index, inView }: { item: any; index: number; inView: boolean }) {
   const [imgError, setImgError] = useState(false);
+  const links = useSiteLinks();
   const safeItem = item ?? {};
   const isEven = index % 2 === 0;
 
@@ -105,7 +107,7 @@ function PortfolioCard({ item, index, inView }: { item: any; index: number; inVi
               {/* Only offered once the project page has more than this card does. */}
               {safeItem?.slug && hasProjectPageContent(safeItem) && (
                 <Link
-                  href={`/projects/${safeItem.slug}`}
+                  href={links.project(safeItem.slug)}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-[#94a348] text-[#0a0c04] text-sm font-semibold rounded-lg hover:bg-[#a8b850] transition-colors"
                 >
                   Read More <ArrowRight size={14} />
