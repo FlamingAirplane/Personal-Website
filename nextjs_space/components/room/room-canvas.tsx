@@ -6,9 +6,10 @@ import { buildRoom } from '@/lib/room/build-room';
 import { createCrushPass } from '@/lib/room/crush-pass';
 import { DEFAULT_WORLD, type WorldId } from '@/lib/room/environments';
 import { createNavigator, type Point } from '@/lib/room/pathfinding';
-import { HOTSPOTS, OBSTACLES, ROOM, START, type Hotspot } from '@/lib/room/room-data';
+import { HOTSPOTS, OBSTACLES, ROOM, START, type Hotspot, type PanelId } from '@/lib/room/room-data';
 import { rememberSiteMode } from '@/lib/site-mode';
 import { withBase } from '@/lib/site';
+import { RoomPanel } from './room-panel';
 
 const LIT_KEY = 'room-lit';
 const MESSAGE_MS = 4500;
@@ -68,6 +69,7 @@ export function RoomCanvas() {
 
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [panel, setPanel] = useState<PanelId | null>(null);
   const [showHint, setShowHint] = useState(true);
   const [ready, setReady] = useState(false);
   const [touch, setTouch] = useState(false);
@@ -197,6 +199,9 @@ export function RoomCanvas() {
         }
       } else if (action.type === 'exit') {
         leave();
+      } else if (spot.panel) {
+        setMessage(null);
+        setPanel(spot.panel);
       } else {
         setMessage(action.line);
       }
@@ -209,6 +214,7 @@ export function RoomCanvas() {
       const dy = spot.center[1] - ROOM.eyeHeight;
       const dz = spot.center[2] - sz;
       setMessage(null);
+      setPanel(null);
       startWalk(
         { x: sx, z: sz },
         {
@@ -500,6 +506,8 @@ export function RoomCanvas() {
           </div>
         </div>
       )}
+
+      {panel && <RoomPanel id={panel} onClose={() => setPanel(null)} />}
 
       <button
         type="button"

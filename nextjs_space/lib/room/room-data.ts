@@ -32,6 +32,9 @@ export type HotspotAction =
   /** Say a line. Placeholder until the object gets its close-up. */
   | { type: 'inspect'; line: string };
 
+/** The part of the site's content an object opens when you use it. */
+export type PanelId = 'games' | 'playable' | 'sound' | 'work' | 'about' | 'skills';
+
 export interface Hotspot {
   id: string;
   /** Short name, shown on hover and read by screen readers. */
@@ -47,6 +50,8 @@ export interface Hotspot {
    * Placeholder pairings until each project brings its own.
    */
   world?: WorldId;
+  /** Content from the site's data (the admin page) that opens in front of the room. */
+  panel?: PanelId;
 }
 
 export const HOTSPOTS: Hotspot[] = [
@@ -66,6 +71,7 @@ export const HOTSPOTS: Hotspot[] = [
     stand: [0.2, -1.4],
     action: { type: 'inspect', line: "The record player. What I've been listening to will spin here." },
     world: 'sunset',
+    panel: 'sound',
   },
   {
     id: 'bookcase',
@@ -75,6 +81,7 @@ export const HOTSPOTS: Hotspot[] = [
     stand: [1.9, -2.15],
     action: { type: 'inspect', line: "The bookcase. What I'm reading goes on these shelves." },
     world: 'city',
+    panel: 'about',
   },
   {
     id: 'computer',
@@ -84,6 +91,7 @@ export const HOTSPOTS: Hotspot[] = [
     stand: [1.7, 0],
     action: { type: 'inspect', line: 'The computer. The bigger games will live on its desktop.' },
     world: 'forest',
+    panel: 'games',
   },
   {
     id: 'toolbox',
@@ -93,6 +101,7 @@ export const HOTSPOTS: Hotspot[] = [
     stand: [2.3, 1.6],
     action: { type: 'inspect', line: 'The toolbox. My tools go in here.' },
     world: 'forest',
+    panel: 'skills',
   },
   {
     id: 'arcade',
@@ -102,6 +111,7 @@ export const HOTSPOTS: Hotspot[] = [
     stand: [0.6, 1.0],
     action: { type: 'inspect', line: 'The arcade machine. Browser games will run right here.' },
     world: 'sunset',
+    panel: 'playable',
   },
   {
     id: 'whiteboard',
@@ -111,6 +121,7 @@ export const HOTSPOTS: Hotspot[] = [
     stand: [-0.8, 1.3],
     action: { type: 'inspect', line: "The whiteboard. What I'm working on right now goes up here." },
     world: 'forest',
+    panel: 'work',
   },
   {
     id: 'door',
@@ -128,6 +139,7 @@ export const HOTSPOTS: Hotspot[] = [
     stand: [-2.3, 2.1],
     action: { type: 'inspect', line: 'Headphones. Putting them on will start the show.' },
     world: 'city',
+    panel: 'sound',
   },
   {
     id: 'cinema',
