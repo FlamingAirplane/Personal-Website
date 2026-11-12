@@ -42,6 +42,8 @@ export interface PortfolioItem {
   imageUrl: string;
   /** External link to play / view it. "#" means none yet. */
   projectLink: string;
+  /** Optional YouTube link. Its thumbnail becomes the cover when imageUrl is empty, and it is the default projectLink. */
+  youtubeUrl?: string;
   year: number;
   type: 'game' | 'sound';
   /** Comma-separated. */
@@ -82,7 +84,7 @@ export const profile: Profile = {
 };
 
 // Listed in the order they appear on the page.
-export const portfolioItems: PortfolioItem[] = [
+const rawPortfolioItems: PortfolioItem[] = [
   {
     id: 'regenesis',
     slug: 'regenesis',
@@ -194,6 +196,7 @@ export const portfolioItems: PortfolioItem[] = [
     description: '',
     imageUrl: '',
     projectLink: '#',
+    youtubeUrl: 'https://www.youtube.com/watch?v=CW5oGRx9CLM',
     year: 2026,
     type: 'sound',
     tags: 'Sound Replacement',
@@ -212,6 +215,29 @@ export const portfolioItems: PortfolioItem[] = [
     tags: 'Sound Design,SFX',
   },
 ];
+
+/** The 11-character video id from any common YouTube link, or null. */
+export function youtubeId(url?: string): string | null {
+  const m = (url ?? '').match(
+    /(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/))([A-Za-z0-9_-]{11})/,
+  );
+  return m ? m[1] : null;
+}
+
+/** Thumbnail address for a YouTube link, or '' when the link is not a YouTube video. */
+export function youtubeThumbnail(url?: string): string {
+  const id = youtubeId(url);
+  return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : '';
+}
+
+// A project with a youtubeUrl gets its thumbnail as the cover (unless it has its own
+// image) and the video as its link (unless it has its own link).
+export const portfolioItems: PortfolioItem[] = rawPortfolioItems.map((item) => ({
+  ...item,
+  imageUrl: item.imageUrl || youtubeThumbnail(item.youtubeUrl),
+  projectLink:
+    item.projectLink && item.projectLink !== '#' ? item.projectLink : item.youtubeUrl || item.projectLink,
+}));
 
 // Newest first.
 export const workHistory: WorkHistoryItem[] = [
