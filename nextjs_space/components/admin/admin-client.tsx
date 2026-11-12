@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Briefcase, Eye, Gamepad2, Loader2, LogOut, Music, Plus, SlidersVertical, Undo2, Upload, User } from 'lucide-react';
+import { ArrowLeft, Box, Briefcase, Eye, Gamepad2, Loader2, LogOut, Music, Plus, SlidersVertical, Undo2, Upload, User } from 'lucide-react';
 import type { PortfolioItem, Profile, SiteContent, SiteSettings, WorkHistoryItem } from '@/lib/content';
 import {
   ACTIONS_URL,
@@ -15,16 +15,18 @@ import {
 } from '@/lib/github-content';
 import { PREVIEW_PATH, readDraft, writeDraft } from '@/lib/preview';
 import { withBase } from '@/lib/site';
+import { withRoomDefaults, type RoomSettings } from '@/lib/room/room-defaults';
 import { LoginCard } from './login-card';
 import { PRIMARY_BUTTON, type Previewer, type Uploader } from './fields';
 import { prepareImage } from './image-prep';
 import { ProjectRows, WorkRows } from './list-rows';
 import { ProfilePanel } from './profile-panel';
 import { ProjectForm } from './project-form';
+import { RoomSettingsPanel } from './room-panel';
 import { SettingsPanel } from './settings-panel';
 import { WorkForm } from './work-form';
 
-type Tab = 'game' | 'sound' | 'work' | 'profile' | 'settings';
+type Tab = 'game' | 'sound' | 'work' | 'profile' | 'settings' | 'room';
 type Notice = { kind: 'ok' | 'error'; text: string };
 
 const TABS: { key: Tab; label: string; icon: typeof Gamepad2 }[] = [
@@ -33,7 +35,12 @@ const TABS: { key: Tab; label: string; icon: typeof Gamepad2 }[] = [
   { key: 'work', label: 'Work', icon: Briefcase },
   { key: 'profile', label: 'Profile & Resume', icon: User },
   { key: 'settings', label: 'Title, Particles & Cursor', icon: SlidersVertical },
+  { key: 'room', label: 'Room', icon: Box },
 ];
+
+function normalise(content: SiteContent): SiteContent {
+  return { ...content, roomSettings: withRoomDefaults(content.roomSettings) };
+}
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -98,9 +105,10 @@ export function AdminClient() {
         const stored = readDraft();
         rememberToken(candidate);
         setToken(candidate);
-        setPublished(loaded.content);
+        const live = normalise(loaded.content);
+        setPublished(live);
         setPublishedSha(loaded.sha);
-        setContent(stored?.content ?? loaded.content);
+        setContent(stored ? normalise(stored.content) : live);
         setBaseSha(stored?.baseSha ?? loaded.sha);
         if (stored) setNotice({ kind: 'ok', text: 'Your unpublished draft from last time is back. Preview it, then Publish.' });
       } catch (error) {
@@ -167,8 +175,8 @@ export function AdminClient() {
     setNotice({ kind: 'ok', text: 'Draft discarded.' });
   }
 
-  function openPreview() {
-    window.open(withBase(PREVIEW_PATH), 'admin-preview');
+  function openPreview(view?: 'room') {
+    window.open(withBase(view ? `${PREVIEW_PATH}?view=${view}` : PREVIEW_PATH), 'admin-preview');
   }
 
   const upload: Uploader = async (file) => {
@@ -287,6 +295,7 @@ export function AdminClient() {
     await commit((c) => ({ ...c, workHistory: c.workHistory.filter((w) => w.id !== item.id) }), `Admin: delete work entry "${item.company}"`);
   }
 
+  const saveRoom = (roomSettings: RoomSettings, message: string) => commit((c) => ({ ...c, roomSettings }), message);
   const saveProfile = (profile: Profile, message: string) => commit((c) => ({ ...c, profile }), message);
   const saveSettings = (titleText: string, siteSettings: SiteSettings, message: string) =>
     commit((c) => ({ ...c, siteSettings, profile: { ...c.profile, siteName: titleText } }), message);
@@ -314,7 +323,7 @@ export function AdminClient() {
                 <Plus size={16} /> {tab === 'work' ? 'Add Work Entry' : 'Add Project'}
               </button>
             )}
-            <button type="button" onClick={openPreview} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-[#1a2e38] text-[#c8d4a8] hover:bg-[#1a2e38]/80" title="See the site with your draft">
+            <button type="button" onClick={() => openPreview()} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-[#1a2e38] text-[#c8d4a8] hover:bg-[#1a2e38]/80" title="See the site with your draft">
               <Eye size={16} /> Preview
             </button>
             <button type="button" onClick={disconnect} className="p-2 rounded-lg hover:bg-[#1a1e10] text-[#c8d4a8]" aria-label="Disconnect from GitHub" title="Disconnect from GitHub">
@@ -346,7 +355,7 @@ export function AdminClient() {
               You have unpublished changes{changes.length ? ` (${changes.length})` : ''}. Preview them, then Publish.
             </span>
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={openPreview} className="flex items-center gap-2 px-3 py-2 rounded-lg font-semibold bg-[#1a2e38] text-[#c8d4a8] hover:bg-[#1a2e38]/80">
+              <button type="button" onClick={() => openPreview()} className="flex items-center gap-2 px-3 py-2 rounded-lg font-semibold bg-[#1a2e38] text-[#c8d4a8] hover:bg-[#1a2e38]/80">
                 <Eye size={16} /> Preview
               </button>
               <button type="button" onClick={discard} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg font-semibold bg-[#1a2e38] text-[#c8d4a8] hover:bg-[#1a2e38]/80 disabled:opacity-50">
@@ -407,6 +416,7 @@ export function AdminClient() {
         )}
 
         {tab === 'profile' && <ProfilePanel profile={content.profile} busy={busy} onSave={saveProfile} upload={upload} preview={preview} />}
+        {tab === 'room' && <RoomSettingsPanel settings={content.roomSettings} busy={busy} onSave={saveRoom} onPreview={() => openPreview('room')} />}
         {tab === 'settings' && <SettingsPanel titleText={content.profile.siteName} settings={content.siteSettings} busy={busy} onSave={saveSettings} />}
       </div>
     </div>

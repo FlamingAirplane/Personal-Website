@@ -88,6 +88,7 @@ export function Slider({
   max,
   onChange,
   hint,
+  step = 1,
 }: {
   label: string;
   unit?: string;
@@ -96,6 +97,7 @@ export function Slider({
   max: number;
   onChange: (value: number) => void;
   hint?: string;
+  step?: number;
 }) {
   return (
     <div>
@@ -107,8 +109,9 @@ export function Slider({
         type="range"
         min={min}
         max={max}
+        step={step}
         value={value}
-        onChange={(e) => onChange(parseInt(e.target.value, 10))}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
         className="w-full accent-[#94a348]"
       />
       {hint && <p className="text-xs text-[#8a9a70]/60 mt-1">{hint}</p>}

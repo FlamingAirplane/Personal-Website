@@ -7,6 +7,7 @@
 // Keep them small: about 1000 pixels wide is plenty for a project cover.
 
 import { withBase } from './site';
+import { withRoomDefaults, type RoomSettings } from './room/room-defaults';
 import data from '../content/site-content.json';
 
 export interface Profile {
@@ -94,6 +95,7 @@ export interface SiteContent {
   siteSettings: SiteSettings;
   portfolioItems: PortfolioItem[];
   workHistory: WorkHistoryItem[];
+  roomSettings: RoomSettings;
 }
 
 const content = data as SiteContent;
@@ -126,6 +128,7 @@ export interface ResolvedContent {
   siteSettings: SiteSettings;
   portfolioItems: PortfolioItem[];
   workHistory: WorkHistoryItem[];
+  roomSettings: RoomSettings;
 }
 
 function resolveGallery(galleryImages: string | undefined, asset: (path: string) => string): string | undefined {
@@ -157,6 +160,7 @@ export function resolveContent(raw: SiteContent, asset: (path: string) => string
       galleryImages: resolveGallery(item.galleryImages, asset),
     })),
     workHistory: bySortOrder(raw.workHistory),
+    roomSettings: withRoomDefaults(raw.roomSettings),
   };
 }
 

@@ -1,39 +1,19 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { buildRoom } from '@/lib/room/build-room';
 import { createCrushPass } from '@/lib/room/crush-pass';
-import { DEFAULT_WORLD, type WorldId } from '@/lib/room/environments';
+import type { WorldId } from '@/lib/room/environments';
 import { createNavigator, type Point } from '@/lib/room/pathfinding';
 import { HOTSPOTS, OBSTACLES, ROOM, START, type Hotspot, type PanelId } from '@/lib/room/room-data';
+import { applyRoomSettings, RS } from '@/lib/room/room-settings';
+import { useSiteContent } from '@/lib/preview';
 import { rememberSiteMode } from '@/lib/site-mode';
 import { withBase } from '@/lib/site';
 import { RoomPanel } from './room-panel';
 
 const LIT_KEY = 'room-lit';
-const MESSAGE_MS = 4500;
-
-// The room is rendered this many pixels along the screen's short side and
-// scaled up with hard edges. This is the bit-crushed look.
-const SHORT_SIDE = 200;
-const LONG_SIDE_MAX = 720;
-
-const WALK_SPEED = 2.6; // metres per second
-const KEY_TURN_SPEED = 1.9; // radians per second
-const DRAG_LOOK = 0.0045; // radians per pixel dragged
-const PITCH_LIMIT = 1.0;
-/** While nothing is moving, draw about 20 frames a second to save power. */
-const IDLE_FRAME_MS = 50;
-
-/** The part of the floor you can stand on. */
-const BOUNDS = {
-  minX: -(ROOM.width / 2 - ROOM.wallMargin),
-  maxX: ROOM.width / 2 - ROOM.wallMargin,
-  minZ: -(ROOM.depth / 2 - ROOM.wallMargin),
-  maxZ: ROOM.depth / 2 - ROOM.wallMargin,
-};
-const navigator2d = createNavigator(OBSTACLES, BOUNDS, ROOM.bodyRadius);
 
 /** A walk in progress, and what happens on arrival. */
 interface Walk {
@@ -66,6 +46,8 @@ function leave() {
 export function RoomCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const apiRef = useRef<RoomApi | null>(null);
+  const { roomSettings } = useSiteContent();
+  useMemo(() => applyRoomSettings(roomSettings), [roomSettings]);
 
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -81,6 +63,21 @@ export function RoomCanvas() {
     if (!canvas) return;
 
     setTouch(window.matchMedia('(pointer: coarse)').matches);
+
+    const SHORT_SIDE = RS.resolution;
+    const LONG_SIDE_MAX = RS.resolutionLongSide;
+    const WALK_SPEED = RS.walkSpeed;
+    const KEY_TURN_SPEED = RS.turnSpeed;
+    const DRAG_LOOK = RS.lookSensitivity / 1000;
+    const PITCH_LIMIT = (RS.lookLimit * Math.PI) / 180;
+    const IDLE_FRAME_MS = RS.idleFrameMs;
+    const BOUNDS = {
+      minX: -(ROOM.width / 2 - ROOM.wallMargin),
+      maxX: ROOM.width / 2 - ROOM.wallMargin,
+      minZ: -(ROOM.depth / 2 - ROOM.wallMargin),
+      maxZ: ROOM.depth / 2 - ROOM.wallMargin,
+    };
+    const navigator2d = createNavigator(OBSTACLES, BOUNDS, ROOM.bodyRadius);
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -108,14 +105,15 @@ export function RoomCanvas() {
     const pose = { x: START.x, z: START.z, yaw: START.yaw, pitch: START.pitch };
     let walk: Walk | null = null;
     let walkPhase = 0;
-    let lit = false;
+    let lit = RS.startLit;
     // The place on the walls when the lights are on: whatever was last inspected.
-    let world: WorldId = DEFAULT_WORLD;
+    let world: WorldId = RS.defaultWorld;
     let hoverId: string | null = null;
     const keys = new Set<string>();
 
     try {
-      lit = window.localStorage.getItem(LIT_KEY) === '1';
+      const saved = window.localStorage.getItem(LIT_KEY);
+      if (saved !== null) lit = saved === '1';
     } catch {
       /* storage unavailable: start dark */
     }
@@ -132,7 +130,7 @@ export function RoomCanvas() {
       renderer.setSize(w, h, false);
       target.setSize(w, h);
       camera.aspect = aspect;
-      camera.fov = aspect >= 1 ? 62 : 78; // wider on a phone held upright
+      camera.fov = aspect >= 1 ? RS.fovLandscape : RS.fovPortrait; // wider on a phone held upright
       camera.updateProjectionMatrix();
     };
     resize();
@@ -455,7 +453,7 @@ export function RoomCanvas() {
   // Spoken lines fade on their own.
   useEffect(() => {
     if (!message) return;
-    const id = window.setTimeout(() => setMessage(null), MESSAGE_MS);
+    const id = window.setTimeout(() => setMessage(null), RS.messageSeconds * 1000);
     return () => window.clearTimeout(id);
   }, [message]);
 

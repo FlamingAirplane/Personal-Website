@@ -7,10 +7,9 @@ import * as THREE from 'three';
 import { withBase } from '../site';
 import { ENVIRONMENTS, PANORAMA, PANORAMA_SCALE, timeOfDayTint, type WorldId } from './environments';
 import { ROOM } from './room-data';
+import { RS } from './room-settings';
 
 const PERIMETER = (ROOM.width + ROOM.depth) * 2;
-const PANEL = 0.5; // metres: each wall is tiled with square panels this size
-const SWITCH_SECONDS = 0.9;
 
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
@@ -35,6 +34,8 @@ const fragmentShader = /* glsl */ `
   uniform vec3 uTintFrom;
   uniform vec3 uTintTo;
   uniform vec2 uPanels;      // panels around the room, panels high
+  uniform float uPanelSize;  // metres
+  uniform vec2 uRoom;        // room width and depth, for the ceiling
 
   varying vec2 vUv;
   varying vec3 vWorld;
@@ -45,6 +46,13 @@ const fragmentShader = /* glsl */ `
 
   void main() {
     vec2 uv = vUv;
+#ifdef CEILING
+    // The ceiling shows the top of the panorama, fanned out from its centre:
+    // straight up is the zenith, the edges blend into the walls' sky.
+    vec2 rel = vWorld.xz / (uRoom * 0.5);
+    float around = atan(rel.y, rel.x) / 6.2831853 + 0.5;
+    uv = vec2(around, 1.0 - clamp(length(rel), 0.0, 1.4) * 0.22);
+#endif
     float dist = distance(cameraPosition, vWorld);
 
     // Tearing: rows slide sideways while the picture changes.
@@ -75,7 +83,11 @@ const fragmentShader = /* glsl */ `
     color = mix(color, vec3(grain * grain), uGlitch * 0.5);
 
     // Which panel is this?
+#ifdef CEILING
+    vec2 panelPos = (vWorld.xz + uRoom * 0.5) / uPanelSize;
+#else
     vec2 panelPos = vUv * uPanels;
+#endif
     vec2 panel = floor(panelPos);
     vec2 inPanel = fract(panelPos);
 
@@ -93,7 +105,7 @@ const fragmentShader = /* glsl */ `
     color *= 1.0 + 0.06 * smoothstep(0.9, 1.0, roll) * uMotion;
 
     // Seams between panels, only visible from nearby.
-    vec2 toEdge = min(inPanel, 1.0 - inPanel) * ${PANEL.toFixed(2)};
+    vec2 toEdge = min(inPanel, 1.0 - inPanel) * uPanelSize;
     float seam = 1.0 - smoothstep(0.004, 0.014, min(toEdge.x, toEdge.y));
     color *= 1.0 - seam * 0.8 * (1.0 - smoothstep(1.6, 4.2, dist));
 
@@ -216,12 +228,23 @@ export function createWallScreens(initial: WorldId): WallScreens {
       uMotion: { value: 1 },
       uTintFrom: { value: tintFor(initial) },
       uTintTo: { value: tintFor(initial) },
-      uPanels: { value: new THREE.Vector2(PERIMETER / PANEL, ROOM.height / PANEL) },
+      uPanels: { value: new THREE.Vector2(PERIMETER / RS.panelSize, ROOM.height / RS.panelSize) },
+      uPanelSize: { value: RS.panelSize },
+      uRoom: { value: new THREE.Vector2(ROOM.width, ROOM.depth) },
     },
     vertexShader,
     fragmentShader,
   });
   disposables.push(material);
+
+  // The ceiling uses the same pictures and uniforms, mapped from above.
+  const ceilingMaterial = new THREE.ShaderMaterial({
+    uniforms: material.uniforms,
+    vertexShader,
+    fragmentShader,
+    defines: { CEILING: '' },
+  });
+  disposables.push(ceilingMaterial);
 
   // One plane per wall. Their texture coordinates run on from each other,
   // so the panorama wraps the room without a break: north, east, south, west.
@@ -247,6 +270,15 @@ export function createWallScreens(initial: WorldId): WallScreens {
     mesh.rotation.y = wall.rotationY;
     group.add(mesh);
     start += wall.length;
+  }
+
+  if (RS.ceilingProjection) {
+    const geometry = new THREE.PlaneGeometry(ROOM.width, ROOM.depth);
+    disposables.push(geometry);
+    const ceiling = new THREE.Mesh(geometry, ceilingMaterial);
+    ceiling.position.set(0, ROOM.height - 0.002, 0);
+    ceiling.rotation.x = Math.PI / 2;
+    group.add(ceiling);
   }
 
   const light = new THREE.HemisphereLight('#ffffff', '#ffffff', 1);
@@ -295,7 +327,7 @@ export function createWallScreens(initial: WorldId): WallScreens {
       material.uniforms.uTime.value = t;
       material.uniforms.uMotion.value = reducedMotion ? 0 : 1;
       if (progress >= 1) return;
-      progress = Math.min(1, progress + dt / SWITCH_SECONDS);
+      progress = Math.min(1, progress + dt / RS.wallSwitchSeconds);
       const mix = THREE.MathUtils.smoothstep(progress, 0.35, 0.65);
       material.uniforms.uMix.value = mix;
       // Reduced motion: a plain cross-fade, no tearing or static.

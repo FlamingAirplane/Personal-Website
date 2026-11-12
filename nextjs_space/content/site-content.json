@@ -216,5 +216,45 @@
       "endDate": "March 2023",
       "sortOrder": 4
     }
-  ]
+  ],
+  "roomSettings": {
+    "ceilingProjection": true,
+    "eyeHeight": 1.6,
+    "wallMargin": 0.4,
+    "bodyRadius": 0.3,
+    "walkSpeed": 2.6,
+    "turnSpeed": 1.9,
+    "lookSensitivity": 4.5,
+    "lookLimit": 57,
+    "fovLandscape": 62,
+    "fovPortrait": 78,
+    "startX": 0,
+    "startZ": 0.9,
+    "startYaw": 0,
+    "startPitch": 0,
+    "startLit": false,
+    "resolution": 200,
+    "resolutionLongSide": 720,
+    "dither": 2,
+    "idleFrameMs": 50,
+    "messageSeconds": 4.5,
+    "wallSwitchSeconds": 0.9,
+    "panelSize": 0.5,
+    "darkWorld": "nebula",
+    "defaultWorld": "forest",
+    "worldLight": {
+      "nebula": 1.3,
+      "forest": 4.2,
+      "sunset": 3,
+      "city": 3
+    },
+    "ambientLight": 0.32,
+    "darkFog": 0.06,
+    "colorFloor": "#8a5636",
+    "colorCeiling": "#3a4048",
+    "colorWood": "#7a4a30",
+    "colorTrim": "#4d2f22",
+    "colorBezel": "#0b0d18",
+    "hotspots": {}
+  }
 }

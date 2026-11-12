@@ -2,7 +2,8 @@
 // geometry until real art exists; the walls are screens (wall-screens.ts).
 
 import * as THREE from 'three';
-import { DARK_WORLD, type WorldId } from './environments';
+import type { WorldId } from './environments';
+import { RS } from './room-settings';
 import { addProps } from './props';
 import { HOTSPOTS, ROOM } from './room-data';
 import { ARCADE_SIZE, PC_SIZE, paintArcade, paintComputer } from './screens';
@@ -149,19 +150,19 @@ export function buildRoom(): Room {
 
   /* ------------------------------ the shell ------------------------------ */
 
-  const trimMat = lambert('#4d2f22');
-  const woodMat = lambert('#7a4a30');
-  const bezelMat = lambert('#0b0d18');
+  const trimMat = lambert(RS.colorTrim);
+  const woodMat = lambert(RS.colorWood);
+  const bezelMat = lambert(RS.colorBezel);
 
-  const floor = box(lambert('#8a5636'), ROOM.width, 0.1, ROOM.depth, 0, -0.05, 0);
+  const floor = box(lambert(RS.colorFloor), ROOM.width, 0.1, ROOM.depth, 0, -0.05, 0);
   // Floorboard seams.
   for (let x = -HALF_W + 0.5; x < HALF_W; x += 0.5) {
     box(trimMat, 0.02, 0.004, ROOM.depth, x, 0.002, 0);
   }
-  box(lambert('#3a4048'), ROOM.width, 0.1, ROOM.depth, 0, ROOM.height + 0.05, 0); // ceiling
+  box(lambert(RS.colorCeiling), ROOM.width, 0.1, ROOM.depth, 0, ROOM.height + 0.05, 0); // ceiling
 
   // The four walls are screens (see wall-screens.ts).
-  const walls = createWallScreens(DARK_WORLD);
+  const walls = createWallScreens(RS.darkWorld);
   scene.add(walls.group, walls.light);
 
   // Bezels where the screens meet the floor and ceiling.
@@ -351,7 +352,7 @@ export function buildRoom(): Room {
   /* -------------------------------- lights ------------------------------- */
 
   // Most of the room's light comes from the wall screens (walls.light).
-  const ambient = new THREE.AmbientLight('#ffffff', 0.32);
+  const ambient = new THREE.AmbientLight('#ffffff', RS.ambientLight);
   const pcLight = new THREE.PointLight('#3a8fa0', 0, 0, 1.8);
   pcLight.position.set(eastX - 0.9, 1.25, 0);
   const arcadeLight = new THREE.PointLight('#5a8fc0', 0, 0, 1.8);
@@ -393,11 +394,11 @@ export function buildRoom(): Room {
   /* -------------------------------- state -------------------------------- */
 
   const setState = (lit: boolean, world: WorldId, instant = false) => {
-    walls.show(lit ? world : DARK_WORLD, instant);
+    walls.show(lit ? world : RS.darkWorld, instant);
     pcLight.intensity = lit ? 0.3 : 1.4;
     arcadeLight.intensity = lit ? 0.3 : 1.2;
     doorLight.intensity = lit ? 0 : 0.5;
-    fog.density = lit ? 0 : 0.06;
+    fog.density = lit ? 0 : RS.darkFog;
     cinemaMat.emissiveIntensity = lit ? 0 : 0.12;
     switchNub.position.y = SWITCH_Y + (lit ? 0.03 : -0.03);
     switchLed.visible = !lit;
@@ -405,7 +406,7 @@ export function buildRoom(): Room {
     headphoneLed.visible = !lit;
     props.setLit(lit);
   };
-  setState(false, DARK_WORLD, true);
+  setState(false, RS.darkWorld, true);
 
   let lastScreens = -1;
 

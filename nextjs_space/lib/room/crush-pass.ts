@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { PALETTE_HEX } from './palette';
+import { RS } from './room-settings';
 
 const fragmentShader = /* glsl */ `
   precision highp float;
@@ -74,7 +75,7 @@ export function createCrushPass(): CrushPass {
     uniforms: {
       tScene: { value: null },
       uPalette: { value: palette },
-      uDither: { value: 2 },
+      uDither: { value: RS.dither },
     },
     vertexShader,
     fragmentShader,
