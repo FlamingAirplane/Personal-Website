@@ -76,7 +76,7 @@ export const profile: Profile = {
   skills: ['Game Design', 'Game Art', 'Game Tech', 'Sound Design', 'SFX Design', 'BG SFX Design'],
   imageUrl: withBase('/images/profile.jpg'),
   heroBgUrl: withBase('/images/hero-bg.jpg'),
-  resumeUrl: '',
+  resumeUrl: '/Adine-Johnson-Resume.pdf',
   twitterUrl: '',
   instagramUrl: '',
   email: 'AAdineWJ3@gmail.com',
