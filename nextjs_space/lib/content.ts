@@ -28,6 +28,8 @@ export interface Profile {
   resumeUrl: string;
   twitterUrl: string;
   instagramUrl: string;
+  email: string;
+  phone: string;
 }
 
 export interface PortfolioItem {
@@ -75,10 +77,25 @@ export const profile: Profile = {
   resumeUrl: '',
   twitterUrl: '',
   instagramUrl: '',
+  email: 'AAdineWJ3@gmail.com',
+  phone: '346-234-5895',
 };
 
 // Listed in the order they appear on the page.
 export const portfolioItems: PortfolioItem[] = [
+  {
+    id: 'regenesis',
+    slug: 'regenesis',
+    title: 'Regenesis',
+    category: 'Game Design & Project Lead',
+    description:
+      'A strategy game for 2–4 players where teams of Heroes navigate a chaotic landscape to collect three Fragments of Regenesis and avert global annihilation.',
+    imageUrl: withBase('/images/portfolio/regenesis.png'),
+    projectLink: '#',
+    year: 2025,
+    type: 'game',
+    tags: 'Board Game,Strategy,Deck Builder,4 Players',
+  },
   {
     id: 'freezepoint',
     slug: 'freezepoint',
@@ -127,7 +144,7 @@ export const portfolioItems: PortfolioItem[] = [
       'An independently developed solo game project showcasing game design skills from concept to completion.',
     imageUrl: withBase('/images/portfolio/manacy.jpg'),
     projectLink: '#',
-    year: 2024,
+    year: 2026,
     type: 'game',
     tags: 'Solo Game,Independent',
   },
@@ -170,6 +187,18 @@ export const portfolioItems: PortfolioItem[] = [
     tags: 'Solo Game,Coming Soon',
   },
   {
+    id: 'false-alarm',
+    slug: 'false-alarm',
+    title: 'The Weeknd - False Alarm',
+    category: 'Sound Replacement',
+    description: '',
+    imageUrl: '',
+    projectLink: '#',
+    year: 2026,
+    type: 'sound',
+    tags: 'Sound Replacement',
+  },
+  {
     id: 'grime-go-away',
     slug: 'grime-go-away',
     title: 'Grime Go Away',
@@ -186,6 +215,15 @@ export const portfolioItems: PortfolioItem[] = [
 
 // Newest first.
 export const workHistory: WorkHistoryItem[] = [
+  {
+    id: 'easy-agent-pro',
+    company: 'Easy Agent Pro',
+    position: 'UI & UX Consultant',
+    description:
+      'While working as a UI & UX Consultant, I learned how to work in a professional environment and learn on the job to achieve a better result.',
+    startDate: 'December 2025',
+    endDate: 'Present',
+  },
   {
     id: 'womack-dev',
     company: 'Womack Development',
@@ -241,5 +279,5 @@ export function parseGallery(item: PortfolioItem): string[] {
 
 /** True when the Resume section has anything to show. */
 export function hasResumeSection(p: Profile): boolean {
-  return Boolean(p.resumeUrl || p.twitterUrl || p.instagramUrl);
+  return Boolean(p.resumeUrl || p.twitterUrl || p.instagramUrl || p.email || p.phone);
 }

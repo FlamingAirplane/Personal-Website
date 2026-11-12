@@ -16,6 +16,8 @@ export function ContactSection({ profile }: Props) {
   const { ref, inView } = useInView({ triggerOnce: true, threshold: 0.1 });
 
   const resumeUrl: string = safeProfile?.resumeUrl ?? '';
+  const email: string = safeProfile?.email ?? '';
+  const phone: string = safeProfile?.phone ?? '';
   const socials = [
     { label: 'Twitter', url: safeProfile?.twitterUrl ?? '' },
     { label: 'Instagram', url: safeProfile?.instagramUrl ?? '' },
@@ -52,6 +54,24 @@ export function ContactSection({ profile }: Props) {
               <p className="text-[#8a9a70] text-sm">Resume coming soon.</p>
             )}
           </div>
+
+          {(email || phone) && (
+            <div className="bg-[#1a2e38] rounded-xl p-6 shadow-md">
+              <h3 className="text-[#94a348] font-semibold mb-4">Contact Info</h3>
+              <div className="flex flex-col gap-3 text-sm">
+                {email && (
+                  <a href={`mailto:${email}`} className="text-[#c8d4a8] hover:text-[#94a348] transition-colors">
+                    {email}
+                  </a>
+                )}
+                {phone && (
+                  <a href={`tel:${phone.replace(/[^0-9+]/g, '')}`} className="text-[#c8d4a8] hover:text-[#94a348] transition-colors">
+                    {phone}
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
 
           {socials.length > 0 && (
             <div className="bg-[#1a2e38] rounded-xl p-6 shadow-md">
