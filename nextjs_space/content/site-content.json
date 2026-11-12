@@ -33,7 +33,7 @@
     "cursorEnabled": true,
     "cursorSize": 12,
     "cursorHoverSize": 40,
-    "cursorLag": 15,
+    "cursorLag": 30,
     "cursorColorLight": "#0a0c04",
     "cursorColorDark": "#c8d4a8"
   },
