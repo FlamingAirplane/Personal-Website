@@ -1,0 +1,10 @@
+Outside scenery for the room's walls and ceiling. All are CC0 (public domain)
+HDRIs from Poly Haven, https://polyhaven.com, at 1k resolution.
+
+forest.hdr  - "Forest Slope"            by Andreas Mischok      https://polyhaven.com/a/forest_slope
+sunset.hdr  - "Bambanani Sunset"        by Dimitrios Savva, Jarod Guest   https://polyhaven.com/a/bambanani_sunset
+city.hdr    - "Modern Buildings Night"  by Greg Zaal            https://polyhaven.com/a/modern_buildings_night
+nebula.hdr  - "Qwantani Night (Pure Sky)" by Greg Zaal, Jarod Guest   https://polyhaven.com/a/qwantani_night_puresky
+
+To use another, put an equirectangular .hdr here and set its address in the
+admin page's Room tab (Outside), or paste any https address.

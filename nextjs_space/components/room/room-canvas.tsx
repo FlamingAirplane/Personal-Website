@@ -1,61 +1,38 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import type { Resolver } from '@/lib/room/assets';
-import { buildRoom, type Room, type RuntimeHotspot } from '@/lib/room/build-room';
-import type { RoomConfig } from '@/lib/room/config';
-import { createCrushPass, type CrushPass } from '@/lib/room/crush-pass';
+import { buildRoom } from '@/lib/room/build-room';
+import { createCrushPass } from '@/lib/room/crush-pass';
+import type { WorldId } from '@/lib/room/environments';
+import { createNavigator, type Point } from '@/lib/room/pathfinding';
+import { HOTSPOTS, OBSTACLES, ROOM, START, type Hotspot, type PanelId } from '@/lib/room/room-data';
+import { applyRoomSettings, RS } from '@/lib/room/room-settings';
+import { useSiteContent } from '@/lib/preview';
 import { rememberSiteMode } from '@/lib/site-mode';
 import { withBase } from '@/lib/site';
-import type { PanelId } from '@/lib/room/room-data';
 import { RoomPanel } from './room-panel';
+import { TvPanel } from './tv-panel';
+import type { Room } from '@/lib/room/build-room';
 
 const LIT_KEY = 'room-lit';
-const MESSAGE_MS = 4500;
-
-/** Settings for the admin preview. */
-export interface EditorHooks {
-  /** The item to outline in green. */
-  selectedId: string | null;
-  /** Called when an item is clicked in the preview. */
-  onSelect: (id: string) => void;
-  /** Change `n` to make the preview walk up to `id`. */
-  visit?: { id: string; n: number } | null;
-}
-
-interface Props {
-  config: RoomConfig;
-  /** Turns a file reference from the config into an address. */
-  resolve: Resolver;
-  editor?: EditorHooks;
-}
-
-/** The card shown when you look at an item that has one. */
-interface CardView {
-  title: string;
-  text: string;
-  imageUrl: string;
-  link: string;
-  linkLabel: string;
-}
 
 /** A walk in progress, and what happens on arrival. */
 interface Walk {
   /** Points still to walk through, going around furniture; the last is the destination. */
-  path: { x: number; z: number }[];
+  path: Point[];
   yaw?: number;
   pitch?: number;
   onArrive?: () => void;
   stuckFrames: number;
 }
 
-/** Controls handed from the 3D loop to React. */
+/** Controls handed from the 3D loop to the React buttons. */
 interface RoomApi {
-  apply(config: RoomConfig, resolve: Resolver, editing: boolean): void;
-  visit(id: string): void;
-  setSelected(id: string | null): void;
+  visit(spot: Hotspot): void;
   highlight(id: string | null): void;
+  /** Walk to the spot in front of the TV and face it. */
+  watchTv(): void;
 }
 
 function shortestAngle(from: number, to: number) {
@@ -70,31 +47,46 @@ function leave() {
   window.location.assign(withBase('/'));
 }
 
-export function RoomCanvas({ config, resolve, editor }: Props) {
+export function RoomCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const apiRef = useRef<RoomApi | null>(null);
-  // The latest props, for the long-lived handlers inside the effect below.
-  const live = useRef({ config, resolve, editor });
-  live.current = { config, resolve, editor };
+  const { roomSettings } = useSiteContent();
+  useMemo(() => applyRoomSettings(roomSettings), [roomSettings]);
 
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [card, setCard] = useState<CardView | null>(null);
   const [panel, setPanel] = useState<PanelId | null>(null);
+  const roomRef = useRef<Room | null>(null);
+  const [tvOn, setTvOn] = useState(false);
+  const [tvMenu, setTvMenu] = useState(false);
+  const tvOnRef = useRef(false);
+  tvOnRef.current = tvOn;
   const [showHint, setShowHint] = useState(true);
   const [ready, setReady] = useState(false);
   const [touch, setTouch] = useState(false);
-  const [items, setItems] = useState<{ id: string; label: string }[]>([]);
   // "unsupported": no WebGL at all. "lost": the browser took the 3D context away.
   const [problem, setProblem] = useState<null | 'unsupported' | 'lost'>(null);
-
-  /* -------------------- the renderer, the loop and the controls -------------------- */
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     setTouch(window.matchMedia('(pointer: coarse)').matches);
+
+    const SHORT_SIDE = RS.resolution;
+    const LONG_SIDE_MAX = RS.resolutionLongSide;
+    const WALK_SPEED = RS.walkSpeed;
+    const KEY_TURN_SPEED = RS.turnSpeed;
+    const DRAG_LOOK = RS.lookSensitivity / 1000;
+    const PITCH_LIMIT = (RS.lookLimit * Math.PI) / 180;
+    const IDLE_FRAME_MS = RS.idleFrameMs;
+    const BOUNDS = {
+      minX: -(ROOM.width / 2 - ROOM.wallMargin),
+      maxX: ROOM.width / 2 - ROOM.wallMargin,
+      minZ: -(ROOM.depth / 2 - ROOM.wallMargin),
+      maxZ: ROOM.depth / 2 - ROOM.wallMargin,
+    };
+    const navigator2d = createNavigator(OBSTACLES, BOUNDS, ROOM.bodyRadius);
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -105,47 +97,53 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
     }
     renderer.setPixelRatio(1);
 
-    let cfg = live.current.config;
-    let room: Room | null = null;
-    let crush: CrushPass | null = null;
-    let editing = false;
-    let seenRevision = -1;
-
-    const target = new THREE.WebGLRenderTarget(cfg.look.shortSide, cfg.look.shortSide, {
+    const room = buildRoom();
+    roomRef.current = room;
+    const crush = createCrushPass();
+    const target = new THREE.WebGLRenderTarget(SHORT_SIDE, SHORT_SIDE, {
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
     });
-    const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 40);
+    crush.setSource(target.texture);
+
+    const camera = new THREE.PerspectiveCamera(62, 1, 0.05, RS.viewDistance);
     camera.rotation.order = 'YXZ';
+
     const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
     // Where you are and where you are looking.
-    const pose = { x: 0, z: 0, yaw: 0, pitch: 0 };
+    const pose = { x: START.x, z: START.z, yaw: START.yaw, pitch: START.pitch };
     let walk: Walk | null = null;
     let walkPhase = 0;
-    let lit = false;
-    let world = cfg.worlds.defaultWorld;
+    let lit = RS.startLit;
+    // The place on the walls when the lights are on: whatever was last inspected.
+    let world: WorldId = RS.defaultWorld;
     let hoverId: string | null = null;
-    let selectedId: string | null = null;
     const keys = new Set<string>();
 
-    const pitchLimit = () => THREE.MathUtils.degToRad(cfg.player.pitchLimit);
+    try {
+      const saved = window.localStorage.getItem(LIT_KEY);
+      if (saved !== null) lit = saved === '1';
+    } catch {
+      /* storage unavailable: start dark */
+    }
+    room.setState(lit, world, true);
 
     /* ------------------------------- sizing ------------------------------ */
 
     const resize = () => {
-      const { shortSide, longSideMax } = cfg.look;
       const cw = canvas.clientWidth || 1;
       const ch = canvas.clientHeight || 1;
       const aspect = cw / ch;
-      const w = aspect >= 1 ? Math.min(longSideMax, Math.round(shortSide * aspect)) : shortSide;
-      const h = aspect >= 1 ? shortSide : Math.min(longSideMax, Math.round(shortSide / aspect));
+      const w = aspect >= 1 ? Math.min(LONG_SIDE_MAX, Math.round(SHORT_SIDE * aspect)) : SHORT_SIDE;
+      const h = aspect >= 1 ? SHORT_SIDE : Math.min(LONG_SIDE_MAX, Math.round(SHORT_SIDE / aspect));
       renderer.setSize(w, h, false);
       target.setSize(w, h);
       camera.aspect = aspect;
-      camera.fov = aspect >= 1 ? cfg.player.fov : cfg.player.fovPortrait;
+      camera.fov = aspect >= 1 ? RS.fovLandscape : RS.fovPortrait; // wider on a phone held upright
       camera.updateProjectionMatrix();
     };
+    resize();
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(canvas);
 
@@ -154,17 +152,14 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
     // The safety net under the route-finding: whatever moved you, you end up
     // inside the walls and outside the furniture.
     const keepInRoom = () => {
-      if (!room) return;
-      const { bounds, obstacles } = room.layout;
-      pose.x = Math.max(bounds.minX, Math.min(bounds.maxX, pose.x));
-      pose.z = Math.max(bounds.minZ, Math.min(bounds.maxZ, pose.z));
-      const r = cfg.room.bodyRadius;
+      pose.x = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, pose.x));
+      pose.z = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, pose.z));
       // Slide around furniture: push out along the shallowest side.
-      for (const [x0, x1, z0, z1] of obstacles) {
-        const ax0 = x0 - r;
-        const ax1 = x1 + r;
-        const az0 = z0 - r;
-        const az1 = z1 + r;
+      for (const [x0, x1, z0, z1] of OBSTACLES) {
+        const ax0 = x0 - ROOM.bodyRadius;
+        const ax1 = x1 + ROOM.bodyRadius;
+        const az0 = z0 - ROOM.bodyRadius;
+        const az1 = z1 + ROOM.bodyRadius;
         if (pose.x <= ax0 || pose.x >= ax1 || pose.z <= az0 || pose.z >= az1) continue;
         const pushes: [number, () => void][] = [
           [pose.x - ax0, () => (pose.x = ax0)],
@@ -177,13 +172,10 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
       }
     };
 
-    const startWalk = (to: { x: number; z: number }, then: Pick<Walk, 'yaw' | 'pitch' | 'onArrive'> = {}) => {
-      if (!room) return;
+    const startWalk = (to: Point, then: Pick<Walk, 'yaw' | 'pitch' | 'onArrive'> = {}) => {
       setShowHint(false);
-      setCard(null);
-      setPanel(null);
-      const path = room.layout.navigator.route({ x: pose.x, z: pose.z }, to);
-      if (reducedMotionQuery.matches || !cfg.player.glide) {
+      const path = navigator2d.route({ x: pose.x, z: pose.z }, to);
+      if (reducedMotionQuery.matches) {
         // No gliding: arrive at once.
         const end = path[path.length - 1];
         pose.x = end.x;
@@ -198,8 +190,7 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
       walk = { path, ...then, stuckFrames: 0 };
     };
 
-    const act = (spot: RuntimeHotspot) => {
-      if (!room) return;
+    const act = (spot: Hotspot) => {
       const action = spot.action;
       if (spot.world && spot.world !== world) {
         world = spot.world;
@@ -208,7 +199,7 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
       if (action.type === 'toggle-light') {
         lit = !lit;
         room.setState(lit, world);
-        setMessage(lit ? cfg.text.lightsOn : cfg.text.lightsOff);
+        setMessage(lit ? RS.lightsOnLine : RS.lightsOffLine);
         try {
           window.localStorage.setItem(LIT_KEY, lit ? '1' : '0');
         } catch {
@@ -216,38 +207,38 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
         }
       } else if (action.type === 'exit') {
         leave();
-      } else if (action.type === 'inspect' && spot.panel && !live.current.editor) {
-        // The site's own content (games, work, about...) opens in front of the room.
+      } else if (action.type === 'remote') {
+        setMessage(null);
+        setPanel(null);
+        room.tv.setPower(true);
+        setTvOn(true);
+        setTvMenu(true);
+      } else if (spot.id === 'tv' && tvOnRef.current) {
+        setMessage(null);
+        setPanel(null);
+        setTvMenu(true);
+      } else if (spot.panel) {
         setMessage(null);
         setPanel(spot.panel);
-      } else if (action.type === 'inspect') {
-        if (action.line) setMessage(action.line);
-        if (spot.card) {
-          setCard({
-            title: spot.card.title,
-            text: spot.card.text,
-            imageUrl: live.current.resolve(spot.card.image),
-            link: spot.card.link,
-            linkLabel: spot.card.linkLabel,
-          });
-        }
+      } else {
+        setMessage(action.line);
       }
     };
 
     /** Walk up to an object, turn to face it, then use it. */
-    const visit = (spot: RuntimeHotspot) => {
+    const visit = (spot: Hotspot) => {
       const [sx, sz] = spot.stand;
       const dx = spot.center[0] - sx;
-      const dy = spot.center[1] - cfg.room.eyeHeight;
+      const dy = spot.center[1] - ROOM.eyeHeight;
       const dz = spot.center[2] - sz;
       setMessage(null);
-      live.current.editor?.onSelect(spot.id);
-      const limit = pitchLimit();
+      setPanel(null);
+      setTvMenu(false);
       startWalk(
         { x: sx, z: sz },
         {
           yaw: Math.atan2(-dx, -dz),
-          pitch: Math.max(-limit, Math.min(limit, Math.atan2(dy, Math.hypot(dx, dz)))),
+          pitch: Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, Math.atan2(dy, Math.hypot(dx, dz)))),
           onArrive: () => act(spot),
         },
       );
@@ -256,83 +247,46 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
     const highlight = (id: string | null) => {
       if (id === hoverId) return;
       hoverId = id;
-      room?.setHighlight(hoverId, selectedId);
+      room.setHighlight(id);
       // The site's custom cursor grows over anything marked like this.
       canvas.dataset.cursorHover = id ? 'true' : 'false';
-      setHoverLabel(id ? (room?.layout.hotspots.find((h) => h.id === id)?.label ?? null) : null);
+      setHoverLabel(id ? (HOTSPOTS.find((h) => h.id === id)?.label ?? null) : null);
     };
 
-    /** Build (or rebuild) the room from a config, keeping where you are and where you look. */
-    const apply = (next: RoomConfig, resolver: Resolver, editMode: boolean) => {
-      const first = room === null;
-      const prev = cfg;
-      cfg = next;
-      editing = editMode;
-      room?.dispose();
-      crush?.dispose();
-      room = buildRoom(next, resolver, { editor: editMode });
-      crush = createCrushPass(next.look.palette, next.look.ditherStrength);
-      crush.setSource(target.texture);
-
-      if (first) {
-        let remembered = false;
-        try {
-          remembered = window.localStorage.getItem(LIT_KEY) === '1';
-        } catch {
-          /* storage unavailable: start dark */
-        }
-        lit = next.light.startLit === 'lit' || (next.light.startLit === 'remember' && remembered);
-        world = next.worlds.defaultWorld;
-      }
-      const p = next.player;
-      const moved =
-        first || p.startX !== prev.player.startX || p.startZ !== prev.player.startZ || p.startYaw !== prev.player.startYaw;
-      if (moved) {
-        pose.x = p.startX;
-        pose.z = p.startZ;
-        pose.yaw = THREE.MathUtils.degToRad(p.startYaw);
-        pose.pitch = 0;
-      }
-      pose.pitch = Math.max(-pitchLimit(), Math.min(pitchLimit(), pose.pitch));
-
-      walk = null;
-      seenRevision = -1;
-      room.setState(lit, world, true);
-      room.setHighlight(hoverId, selectedId);
-      resize();
-      keepInRoom();
+    const watchTv = () => {
+      const tv = HOTSPOTS.find((h) => h.id === 'tv');
+      if (!tv) return;
+      const [sx, sz] = tv.stand;
+      const dx = tv.center[0] - sx;
+      const dz = tv.center[2] - sz;
+      startWalk(
+        { x: sx, z: sz },
+        {
+          yaw: Math.atan2(-dx, -dz),
+          pitch: Math.atan2(tv.center[1] - ROOM.eyeHeight, Math.hypot(dx, dz)),
+        },
+      );
     };
 
-    apiRef.current = {
-      apply,
-      visit(id) {
-        const spot = room?.layout.hotspots.find((h) => h.id === id);
-        if (spot) visit(spot);
-      },
-      setSelected(id) {
-        selectedId = id;
-        room?.setHighlight(hoverId, selectedId);
-      },
-      highlight,
-    };
+    apiRef.current = { visit, highlight, watchTv };
 
     /* ------------------------------ pointing ----------------------------- */
 
     const raycaster = new THREE.Raycaster();
     const pointerNdc = new THREE.Vector2();
+    const pickTargets: THREE.Object3D[] = [...room.hitVolumes, room.floor];
 
     const pick = (clientX: number, clientY: number) => {
-      if (!room) return null;
       const bounds = canvas.getBoundingClientRect();
       pointerNdc.set(
         ((clientX - bounds.left) / bounds.width) * 2 - 1,
         -((clientY - bounds.top) / bounds.height) * 2 + 1,
       );
       raycaster.setFromCamera(pointerNdc, camera);
-      const hit = raycaster.intersectObjects([...room.hitGroup.children, room.floor], false)[0];
+      const hit = raycaster.intersectObjects(pickTargets, false)[0];
       if (!hit) return null;
       const id = hit.object.userData.hotspotId as string | undefined;
-      const spot = id ? room.layout.hotspots.find((h) => h.id === id) : undefined;
+      const spot = id ? HOTSPOTS.find((h) => h.id === id) : undefined;
       return spot ? { spot } : { floor: hit.point };
     };
 
@@ -354,9 +308,11 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
         }
         if (press.dragging) {
           // Drag the view like grabbing the scene.
-          const limit = pitchLimit();
-          pose.yaw += (e.clientX - press.lastX) * cfg.player.lookSpeed;
-          pose.pitch = Math.max(-limit, Math.min(limit, pose.pitch + (e.clientY - press.lastY) * cfg.player.lookSpeed));
+          pose.yaw += (e.clientX - press.lastX) * DRAG_LOOK;
+          pose.pitch = Math.max(
+            -PITCH_LIMIT,
+            Math.min(PITCH_LIMIT, pose.pitch + (e.clientY - press.lastY) * DRAG_LOOK),
+          );
         }
         press.lastX = e.clientX;
         press.lastY = e.clientY;
@@ -393,15 +349,8 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
 
     const MOVE_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'];
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setCard(null);
-        setPanel(null);
-      }
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (!MOVE_KEYS.includes(key) || e.metaKey || e.ctrlKey || e.altKey) return;
-      // Typing in the admin page's fields must not walk the camera.
-      const el = document.activeElement as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) return;
       e.preventDefault();
       keys.add(key);
       walk = null;
@@ -423,22 +372,14 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
-      if (!room || !crush) return;
 
       // Standing still with nothing changing: no need for every frame.
       const active = walk !== null || keys.size > 0 || (press?.dragging ?? false) || room.busy() || !drawnOnce;
-      if (!active && now - last < 1000 / cfg.look.idleFps) return;
+      if (!active && now - last < IDLE_FRAME_MS) return;
 
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const reducedMotion = reducedMotionQuery.matches;
-      const player = cfg.player;
-
-      // Models and pictures arrive after the room is built, which changes what can be clicked.
-      if (room.layout.revision !== seenRevision) {
-        seenRevision = room.layout.revision;
-        setItems(room.layout.hotspots.map((h) => ({ id: h.id, label: h.label })));
-      }
 
       const beforeX = pose.x;
       const beforeZ = pose.z;
@@ -448,10 +389,10 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
         (keys.has('ArrowLeft') || keys.has('a') ? 1 : 0) - (keys.has('ArrowRight') || keys.has('d') ? 1 : 0);
       const advance =
         (keys.has('ArrowUp') || keys.has('w') ? 1 : 0) - (keys.has('ArrowDown') || keys.has('s') ? 1 : 0);
-      pose.yaw += turn * player.turnSpeed * dt;
+      pose.yaw += turn * KEY_TURN_SPEED * dt;
       if (advance) {
-        pose.x += -Math.sin(pose.yaw) * advance * player.walkSpeed * dt;
-        pose.z += -Math.cos(pose.yaw) * advance * player.walkSpeed * dt;
+        pose.x += -Math.sin(pose.yaw) * advance * WALK_SPEED * dt;
+        pose.z += -Math.cos(pose.yaw) * advance * WALK_SPEED * dt;
       }
 
       if (walk) {
@@ -462,7 +403,7 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
         const dist = Math.hypot(dx, dz);
         if (dist > 0.001) {
           // Full speed around corners; ease in only to the destination.
-          const speed = isLast ? Math.min(player.walkSpeed, dist * 4 + 0.5) : player.walkSpeed;
+          const speed = isLast ? Math.min(WALK_SPEED, dist * 4 + 0.5) : WALK_SPEED;
           const step = Math.min(dist, speed * dt);
           pose.x += (dx / dist) * step;
           pose.z += (dz / dist) * step;
@@ -498,9 +439,9 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
       // A small bob while walking.
       const moved = Math.hypot(pose.x - beforeX, pose.z - beforeZ);
       if (moved > 0.0005 && !reducedMotion) walkPhase += moved * 5.5;
-      const bob = reducedMotion ? 0 : Math.sin(walkPhase) * player.bob;
+      const bob = reducedMotion ? 0 : Math.sin(walkPhase) * RS.walkBob;
 
-      camera.position.set(pose.x, cfg.room.eyeHeight + bob, pose.z);
+      camera.position.set(pose.x, ROOM.eyeHeight + bob, pose.z);
       camera.rotation.set(pose.pitch, pose.yaw, 0);
 
       room.update(now / 1000, dt, reducedMotion);
@@ -525,12 +466,10 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
     };
     canvas.addEventListener('webglcontextlost', onContextLost);
 
-    // Build the room for the first time.
-    apply(live.current.config, live.current.resolve, Boolean(live.current.editor));
-
     return () => {
       cancelAnimationFrame(raf);
       apiRef.current = null;
+      roomRef.current = null;
       resizeObserver.disconnect();
       canvas.removeEventListener('webglcontextlost', onContextLost);
       canvas.removeEventListener('pointerdown', onPointerDown);
@@ -541,53 +480,36 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
-      room?.dispose();
-      crush?.dispose();
+      room.dispose();
+      crush.dispose();
       target.dispose();
       renderer.dispose();
-      void editing;
     };
   }, []);
-
-  /* ------------------------ reacting to changes from outside ------------------------ */
-
-  const isEditing = Boolean(editor);
-  const selectedId = editor?.selectedId ?? null;
-  const visitRequest = editor?.visit ?? null;
-
-  // A new config (the admin page edited something): rebuild the room.
-  const firstApply = useRef(true);
-  useEffect(() => {
-    // The first build happens inside the effect above.
-    if (firstApply.current) {
-      firstApply.current = false;
-      return;
-    }
-    apiRef.current?.apply(config, resolve, isEditing);
-  }, [config, resolve, isEditing]);
-
-  useEffect(() => {
-    apiRef.current?.setSelected(selectedId);
-  }, [selectedId, config]);
-
-  useEffect(() => {
-    if (visitRequest) apiRef.current?.visit(visitRequest.id);
-  }, [visitRequest]);
 
   // Spoken lines fade on their own.
   useEffect(() => {
     if (!message) return;
-    const id = window.setTimeout(() => setMessage(null), MESSAGE_MS);
+    const id = window.setTimeout(() => setMessage(null), RS.messageSeconds * 1000);
     return () => window.clearTimeout(id);
   }, [message]);
 
-  const hint = touch ? config.text.hintTouch : config.text.hintMouse;
+  const closeTvMenu = useCallback(() => setTvMenu(false), []);
+  const powerOffTv = useCallback(() => {
+    roomRef.current?.tv.setPower(false);
+    setTvMenu(false);
+    setTvOn(false);
+  }, []);
+  const setTvVideo = useCallback((video: HTMLVideoElement | null) => roomRef.current?.tv.setVideo(video), []);
+  const setTvStandby = useCallback((text: string) => roomRef.current?.tv.setStandby(text), []);
+  const watchTv = useCallback(() => apiRef.current?.watchTv(), []);
+
+  const hint = touch ? RS.hintTouch : RS.hintMouse;
   const caption = message ?? hoverLabel ?? (showHint && ready ? hint : '');
-  const rootClass = editor ? 'absolute inset-0' : 'fixed inset-0';
 
   return (
-    <main className={`${rootClass} select-none overflow-hidden bg-[#05060a] font-mono`}>
-      {!editor && <h1 className="sr-only">Adine Johnson&apos;s room</h1>}
+    <main className="fixed inset-0 select-none overflow-hidden bg-[#05060a] font-mono">
+      <h1 className="sr-only">Adine Johnson&apos;s room</h1>
 
       <canvas
         ref={canvasRef}
@@ -598,7 +520,7 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
 
       {!ready && !problem && (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm uppercase tracking-widest text-[#8a9a70]">
-          {config.text.loading}
+          Loading the room…
         </p>
       )}
 
@@ -619,84 +541,57 @@ export function RoomCanvas({ config, resolve, editor }: Props) {
                 Reload
               </button>
             )}
-            {!editor && (
-              <button
-                type="button"
-                onClick={leave}
-                className="border border-[#2e3a1c] px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#c8d4a8]"
-              >
-                {config.text.standardSite}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={leave}
+              className="border border-[#2e3a1c] px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#c8d4a8]"
+            >
+              Standard site
+            </button>
           </div>
         </div>
       )}
 
-      {!editor && (
-        <button
-          type="button"
-          onClick={leave}
-          className="absolute right-3 top-3 z-10 bg-[#05060a]/70 px-3 py-2 text-xs uppercase tracking-widest text-[#c8d4a8] transition-colors hover:text-[#f3f7e4]"
-        >
-          {config.text.standardSite}
-        </button>
+      {panel && <RoomPanel id={panel} onClose={() => setPanel(null)} />}
+
+      {tvOn && (
+        <TvPanel
+          menuOpen={tvMenu}
+          onCloseMenu={closeTvMenu}
+          onPowerOff={powerOffTv}
+          onVideo={setTvVideo}
+          onStandby={setTvStandby}
+          onWatch={watchTv}
+        />
       )}
+
+      <button
+        type="button"
+        onClick={leave}
+        className="absolute right-3 top-3 z-10 bg-[#05060a]/70 px-3 py-2 text-xs uppercase tracking-widest text-[#c8d4a8] transition-colors hover:text-[#f3f7e4]"
+      >
+        Standard site
+      </button>
 
       {/* The same objects as a list, for keyboards and screen readers. It is
           invisible, and ignores the mouse, until one of its buttons is focused. */}
-      {!editor && (
-        <nav
-          aria-label="Things in the room"
-          className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[60%] flex-wrap gap-1 opacity-0 focus-within:pointer-events-auto focus-within:opacity-100"
-        >
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => apiRef.current?.visit(item.id)}
-              onFocus={() => apiRef.current?.highlight(item.id)}
-              onBlur={() => apiRef.current?.highlight(null)}
-              className="bg-[#05060a]/80 px-2 py-1 text-xs text-[#c8d4a8]"
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      )}
-
-      {panel && <RoomPanel id={panel} onClose={() => setPanel(null)} />}
-
-      {card && (
-        <aside
-          aria-label={card.title || 'About this'}
-          className="absolute bottom-16 left-3 right-3 z-20 max-h-[60%] max-w-sm overflow-y-auto border border-[#2e3a1c] bg-[#05060a]/92 p-4 text-[#f3f7e4] shadow-lg sm:right-auto"
-        >
+      <nav
+        aria-label="Things in the room"
+        className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[60%] flex-wrap gap-1 opacity-0 focus-within:pointer-events-auto focus-within:opacity-100"
+      >
+        {HOTSPOTS.map((spot) => (
           <button
+            key={spot.id}
             type="button"
-            onClick={() => setCard(null)}
-            aria-label="Close"
-            className="absolute right-2 top-2 px-2 py-1 text-sm text-[#c8d4a8] hover:text-[#f3f7e4]"
+            onClick={() => apiRef.current?.visit(spot)}
+            onFocus={() => apiRef.current?.highlight(spot.id)}
+            onBlur={() => apiRef.current?.highlight(null)}
+            className="bg-[#05060a]/80 px-2 py-1 text-xs text-[#c8d4a8]"
           >
-            ✕
+            {spot.label}
           </button>
-          {card.imageUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={card.imageUrl} alt="" className="mb-3 max-h-48 w-full object-cover" />
-          )}
-          {card.title && <h2 className="pr-8 text-lg font-bold tracking-tight">{card.title}</h2>}
-          {card.text && <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[#c8d4a8]">{card.text}</p>}
-          {card.link && (
-            <a
-              href={card.link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 inline-block border border-[#94a348] bg-[#94a348] px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#0a0c04] hover:bg-[#c8d4a8]"
-            >
-              {card.linkLabel || 'Open'}
-            </a>
-          )}
-        </aside>
-      )}
+        ))}
+      </nav>
 
       <p
         aria-live="polite"

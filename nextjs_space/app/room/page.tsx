@@ -1,4 +1,4 @@
-import { RoomLoader } from '@/components/room/room-loader';
+import { RoomCanvas } from '@/components/room/room-canvas';
 import { SITE_URL } from '@/lib/site';
 
 export const metadata = {
@@ -8,5 +8,5 @@ export const metadata = {
 };
 
 export default function RoomPage() {
-  return <RoomLoader />;
+  return <RoomCanvas />;
 }

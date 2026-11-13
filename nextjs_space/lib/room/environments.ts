@@ -2,10 +2,9 @@
 // all the way around the room: north wall first, then east, south and west.
 //
 // Each has a drawing made in code, which shows at once. If it also names an
-// `image`, that photo replaces the drawing as soon as it has loaded. Photos
-// live in public/images/room/ and are 2080 x 240 pixels (see CREDITS.txt).
-
-import type { BuiltinWorldId } from './config';
+// `hdri`, that equirectangular HDRI replaces the drawing as soon as it has
+// loaded, and is seen through the walls and ceiling like windows. HDRIs live
+// in public/hdri/ (see CREDITS.txt there).
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -14,7 +13,7 @@ export const PANORAMA = { w: 1040, h: 120 };
 /** Wall textures are twice that, to match the photos. */
 export const PANORAMA_SCALE = 2;
 
-export type WorldId = BuiltinWorldId;
+export type WorldId = 'nebula' | 'forest' | 'sunset' | 'city';
 
 export interface Environment {
   id: WorldId;
@@ -25,9 +24,14 @@ export interface Environment {
   followsClock: boolean;
   /** Stand-in drawing, shown until the photo (if any) has loaded. */
   paint(ctx: Ctx): void;
-  /** Site-relative path to a panorama photo. */
-  image?: string;
+  /** Site-relative path to an equirectangular HDRI (.hdr) shown outside. */
+  hdri?: string;
 }
+
+/** What the walls show with the lights off. */
+export const DARK_WORLD: WorldId = 'nebula';
+/** What they show with the lights on, before anything has been inspected. */
+export const DEFAULT_WORLD: WorldId = 'forest';
 
 const { w: W, h: H } = PANORAMA;
 
@@ -185,20 +189,18 @@ function paintCity(ctx: Ctx) {
 }
 
 export const ENVIRONMENTS: Record<WorldId, Environment> = {
-  nebula: { id: 'nebula', label: 'Nebula', light: 1.3, followsClock: false, paint: paintNebula },
-  forest: { id: 'forest', label: 'Forest', light: 4.2, followsClock: true, paint: paintForest, image: '/images/room/forest.jpg' },
-  sunset: { id: 'sunset', label: 'Sunset', light: 3.0, followsClock: false, paint: paintSunset, image: '/images/room/sunset.jpg' },
-  city: { id: 'city', label: 'City at night', light: 3.0, followsClock: false, paint: paintCity, image: '/images/room/city.jpg' },
+  nebula: { id: 'nebula', label: 'Nebula', light: 1.3, followsClock: false, paint: paintNebula, hdri: '/hdri/nebula.hdr' },
+  forest: { id: 'forest', label: 'Forest', light: 4.2, followsClock: true, paint: paintForest, hdri: '/hdri/forest.hdr' },
+  sunset: { id: 'sunset', label: 'Sunset', light: 3.0, followsClock: false, paint: paintSunset, hdri: '/hdri/sunset.hdr' },
+  city: { id: 'city', label: 'City at night', light: 3.0, followsClock: false, paint: paintCity, hdri: '/hdri/city.hdr' },
 };
 
 /**
- * A colour multiplier for the time of day (the visitor's local time unless
- * `hour` is given), so the world on the walls keeps the hours they do.
- * Returned as linear r, g, b.
+ * A colour multiplier for the visitor's local time, so the world on the
+ * walls keeps the hours they do. Returned as linear r, g, b.
  */
-export function timeOfDayTint(hour?: number): [number, number, number] {
-  const now = new Date();
-  const h = hour ?? now.getHours() + now.getMinutes() / 60;
+export function timeOfDayTint(date = new Date()): [number, number, number] {
+  const h = date.getHours() + date.getMinutes() / 60;
   const night: [number, number, number] = [0.3, 0.36, 0.62];
   const dawn: [number, number, number] = [1.0, 0.8, 0.68];
   const day: [number, number, number] = [1, 1, 1];

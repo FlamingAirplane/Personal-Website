@@ -154,7 +154,7 @@
       "year": 2026,
       "type": "sound",
       "tags": "Sound Replacement",
-      "sortOrder": 8
+      "sortOrder": 9
     },
     {
       "id": "grime-go-away",
@@ -167,7 +167,22 @@
       "year": 2025,
       "type": "sound",
       "tags": "Sound Design,SFX",
-      "sortOrder": 9
+      "sortOrder": 10
+    },
+    {
+      "id": "lunagolem",
+      "slug": "lunagolem",
+      "title": "LunaGolem",
+      "category": "Game Design, Art & Tech (Game Jam)",
+      "description": "Aim and fire as LunaGolem, descending a dungeon on the moon and absorbing one element at a time from glowing fields. Built in a one-day browser game jam with three.js.",
+      "imageUrl": "",
+      "projectLink": "https://flamingairplane.github.io/jab-jam-game/",
+      "embedUrl": "https://flamingairplane.github.io/jab-jam-game/",
+      "sourceUrl": "https://github.com/FlamingAirplane/jab-jam-game",
+      "year": 2026,
+      "type": "game",
+      "tags": "Game Jam,three.js,Shooter,Browser Game",
+      "sortOrder": 8
     }
   ],
   "workHistory": [
@@ -216,5 +231,51 @@
       "endDate": "March 2023",
       "sortOrder": 4
     }
-  ]
+  ],
+  "roomSettings": {
+    "ceilingProjection": true,
+    "eyeHeight": 1.6,
+    "wallMargin": 0.4,
+    "bodyRadius": 0.3,
+    "walkSpeed": 2.6,
+    "turnSpeed": 1.9,
+    "lookSensitivity": 4.5,
+    "lookLimit": 57,
+    "fovLandscape": 62,
+    "fovPortrait": 78,
+    "startX": 0,
+    "startZ": 0.9,
+    "startYaw": 0,
+    "startPitch": 0,
+    "startLit": false,
+    "resolution": 200,
+    "resolutionLongSide": 720,
+    "dither": 2,
+    "idleFrameMs": 50,
+    "messageSeconds": 4.5,
+    "wallSwitchSeconds": 0.9,
+    "panelSize": 0.5,
+    "darkWorld": "nebula",
+    "defaultWorld": "forest",
+    "worldLight": {
+      "nebula": 1.3,
+      "forest": 4.2,
+      "sunset": 3,
+      "city": 3
+    },
+    "ambientLight": 0.32,
+    "darkFog": 0.06,
+    "colorFloor": "#8a5636",
+    "colorCeiling": "#3a4048",
+    "colorWood": "#7a4a30",
+    "colorTrim": "#4d2f22",
+    "colorBezel": "#0b0d18",
+    "hotspots": {},
+    "worldExposure": {
+      "nebula": 0.5,
+      "forest": 1,
+      "sunset": 1,
+      "city": 1
+    }
+  }
 }

@@ -1,16 +1,16 @@
-// The walls and the ceiling are giant screens showing a place that is not
-// really there. From across the room it reads as scenery; up close you can
-// see the panel seams and the pixel grid, now and then a panel drops out,
-// and when the place changes the whole surface tears into static for a moment.
-//
-// The walls show one panorama that wraps all the way round: north wall
-// first, then east, south and west. The ceiling continues the colours at the
-// top of the walls inwards, unless the place has a ceiling picture of its own.
+// The four walls are giant screens showing a place that is not really there.
+// From across the room it reads as scenery; up close you can see the panel
+// seams and the pixel grid, now and then a panel drops out, and when the
+// place changes the whole wall tears into static for a moment.
 
 import * as THREE from 'three';
-import type { ImageSpec, RoomConfig } from './config';
-import { PANORAMA, PANORAMA_SCALE, timeOfDayTint } from './environments';
-import type { WorldDef } from './worlds';
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
+import { withBase } from '../site';
+import { ENVIRONMENTS, PANORAMA, PANORAMA_SCALE, timeOfDayTint, type WorldId } from './environments';
+import { ROOM } from './room-data';
+import { RS } from './room-settings';
+
+const PERIMETER = (ROOM.width + ROOM.depth) * 2;
 
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
@@ -28,21 +28,28 @@ const fragmentShader = /* glsl */ `
 
   uniform sampler2D tFrom;
   uniform sampler2D tTo;
+  uniform float uModeFrom;   // 1 = HDRI seen through the walls, 0 = drawn strip
+  uniform float uModeTo;
+  uniform float uYawFrom;    // turns of the HDRI
+  uniform float uYawTo;
+  uniform float uExpFrom;
+  uniform float uExpTo;
+  uniform float uSat;
+  uniform float uBright;
+  uniform float uSeam;
+  uniform float uGrid;
+  uniform float uDrop;
+  uniform float uDead;
+  uniform float uRollBand;
   uniform float uMix;        // 0 = old place, 1 = new place
   uniform float uGlitch;     // 0..1, peaks mid-switch
   uniform float uTime;
   uniform float uMotion;     // 0 when the visitor asked for reduced motion
   uniform vec3 uTintFrom;
   uniform vec3 uTintTo;
-  uniform vec2 uPanels;      // panels across, panels down
+  uniform vec2 uPanels;      // panels around the room, panels high
   uniform float uPanelSize;  // metres
-  uniform float uSeam;
-  uniform float uGrid;
-  uniform float uSat;
-  uniform float uBright;
-  uniform float uFlicker;
-  uniform float uDead;       // 1 = one panel never works
-  uniform float uRoll;       // 1 = a bright band rolls down the screen
+  uniform vec2 uRoom;        // room width and depth, for the ceiling
 
   varying vec2 vUv;
   varying vec3 vWorld;
@@ -51,8 +58,25 @@ const fragmentShader = /* glsl */ `
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
   }
 
+  // One picture, in either of its two forms. An HDRI is looked at along the line
+  // from the viewer through this bit of wall, like a window onto a far-away place.
+  vec3 envSample(sampler2D t, float mode, float yaw, float exposure, vec2 strip, vec2 hdri, float dx) {
+    if (mode > 0.5) {
+      vec3 c = texture2D(t, hdri + vec2(yaw + dx, 0.0)).rgb;
+      return vec3(1.0) - exp(-c * exposure);
+    }
+    return texture2D(t, strip + vec2(dx, 0.0)).rgb;
+  }
+
   void main() {
     vec2 uv = vUv;
+#ifdef CEILING
+    // The ceiling shows the top of the panorama, fanned out from its centre:
+    // straight up is the zenith, the edges blend into the walls' sky.
+    vec2 rel = vWorld.xz / (uRoom * 0.5);
+    float around = atan(rel.y, rel.x) / 6.2831853 + 0.5;
+    uv = vec2(around, 1.0 - clamp(length(rel), 0.0, 1.4) * 0.22);
+#endif
     float dist = distance(cameraPosition, vWorld);
 
     // Tearing: rows slide sideways while the picture changes.
@@ -62,15 +86,17 @@ const fragmentShader = /* glsl */ `
 
     // Colour channels come apart a little during the switch.
     float split = 0.004 * uGlitch;
+    vec3 dir = normalize(vWorld - cameraPosition);
+    vec2 hdri = vec2(atan(dir.x, -dir.z) / 6.2831853 + 0.5 + tear, asin(clamp(dir.y, -1.0, 1.0)) / 3.1415927 + 0.5);
     vec3 from = vec3(
-      texture2D(tFrom, uv + vec2(split, 0.0)).r,
-      texture2D(tFrom, uv).g,
-      texture2D(tFrom, uv - vec2(split, 0.0)).b
+      envSample(tFrom, uModeFrom, uYawFrom, uExpFrom, uv, hdri, split).r,
+      envSample(tFrom, uModeFrom, uYawFrom, uExpFrom, uv, hdri, 0.0).g,
+      envSample(tFrom, uModeFrom, uYawFrom, uExpFrom, uv, hdri, -split).b
     ) * uTintFrom;
     vec3 to = vec3(
-      texture2D(tTo, uv + vec2(split, 0.0)).r,
-      texture2D(tTo, uv).g,
-      texture2D(tTo, uv - vec2(split, 0.0)).b
+      envSample(tTo, uModeTo, uYawTo, uExpTo, uv, hdri, split).r,
+      envSample(tTo, uModeTo, uYawTo, uExpTo, uv, hdri, 0.0).g,
+      envSample(tTo, uModeTo, uYawTo, uExpTo, uv, hdri, -split).b
     ) * uTintTo;
     vec3 color = mix(from, to, uMix);
 
@@ -83,22 +109,26 @@ const fragmentShader = /* glsl */ `
     color = mix(color, vec3(grain * grain), uGlitch * 0.5);
 
     // Which panel is this?
+#ifdef CEILING
+    vec2 panelPos = (vWorld.xz + uRoom * 0.5) / uPanelSize;
+#else
     vec2 panelPos = vUv * uPanels;
+#endif
     vec2 panel = floor(panelPos);
     vec2 inPanel = fract(panelPos);
 
     // Idle flicker: now and then one panel loses signal for a moment.
     float tick = floor(uTime * 2.0);
-    float dropout = step(1.0 - 0.0012 * uFlicker, hash(panel + tick * 17.0)) * uMotion;
+    float dropout = step(1.0 - uDrop, hash(panel + tick * 17.0)) * uMotion;
     // One panel that never quite works.
     float dead = step(abs(panel.x - 31.0) + abs(panel.y - 3.0), 0.5) * uDead;
     float broken = max(dropout, dead);
     float snow = hash(floor(vUv * vec2(1040.0, 120.0)) + floor(uTime * 12.0) * uMotion);
     color = mix(color, vec3(snow * 0.08), broken * (dead > 0.5 ? 0.9 : 0.8));
 
-    // A faint bright band rolling slowly down the screen.
+    // A faint bright band rolling slowly down the wall.
     float roll = fract(vUv.y + uTime * 0.07);
-    color *= 1.0 + 0.06 * smoothstep(0.9, 1.0, roll) * uMotion * uRoll;
+    color *= 1.0 + uRollBand * smoothstep(0.9, 1.0, roll) * uMotion;
 
     // Seams between panels, only visible from nearby.
     vec2 toEdge = min(inPanel, 1.0 - inPanel) * uPanelSize;
@@ -114,55 +144,24 @@ const fragmentShader = /* glsl */ `
   }
 `;
 
-const TEX_W = PANORAMA.w * PANORAMA_SCALE;
-const TEX_H = PANORAMA.h * PANORAMA_SCALE;
-const CEIL_W = 128;
-
-/* ----------------------------- picture handling ---------------------------- */
-
-const imageCache = new Map<string, Promise<HTMLImageElement | null>>();
-
-/** Load a picture once; resolves to null if it cannot be loaded. */
-function loadImage(url: string): Promise<HTMLImageElement | null> {
-  let pending = imageCache.get(url);
-  if (!pending) {
-    pending = new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
-      img.src = url;
-    });
-    imageCache.set(url, pending);
-  }
-  return pending;
+interface Loaded {
+  texture: THREE.Texture;
+  /** 1 once the HDRI has arrived, 0 while the drawn stand-in shows. */
+  mode: number;
+  /** Average colour of the upper and lower halves, for lighting the room. */
+  sky: THREE.Color;
+  ground: THREE.Color;
 }
 
-/** Lay a picture onto the wall-band canvas the way `spec` asks. */
-function drawSpec(ctx: CanvasRenderingContext2D, img: HTMLImageElement, spec: ImageSpec) {
-  ctx.clearRect(0, 0, TEX_W, TEX_H);
-  const tileW = TEX_W / spec.repeat;
-  for (let i = 0; i < spec.repeat; i++) {
-    const dx = i * tileW;
-    if (spec.fit === 'stretch') {
-      ctx.drawImage(img, dx, 0, tileW, TEX_H);
-      continue;
-    }
-    // Cover: crop the picture to the tile's shape.
-    const tileAspect = tileW / TEX_H;
-    const imgAspect = img.width / img.height;
-    let sw = img.width;
-    let sh = img.height;
-    let sx = 0;
-    let sy = 0;
-    if (imgAspect > tileAspect) {
-      sw = img.height * tileAspect;
-      sx = (img.width - sw) / 2;
-    } else {
-      sh = img.width / tileAspect;
-      sy = (img.height - sh) * spec.focusY;
-    }
-    ctx.drawImage(img, sx, sy, sw, sh, dx, 0, tileW, TEX_H);
-  }
+export interface WallScreens {
+  group: THREE.Group;
+  /** Light cast into the room by whatever the walls are showing. */
+  light: THREE.HemisphereLight;
+  show(world: WorldId, instant?: boolean): void;
+  /** True while the walls are switching from one place to another. */
+  busy(): boolean;
+  update(t: number, dt: number, reducedMotion: boolean): void;
+  dispose(): void;
 }
 
 function averageColor(data: Uint8ClampedArray, from: number, to: number) {
@@ -176,124 +175,20 @@ function averageColor(data: Uint8ClampedArray, from: number, to: number) {
     b += data[i + 2];
     n++;
   }
-  n = Math.max(1, n);
   return new THREE.Color().setRGB(r / n / 255, g / n / 255, b / n / 255, THREE.SRGBColorSpace);
 }
 
-/* ---------------------------------- types ---------------------------------- */
-
-interface Loaded {
-  wall: THREE.CanvasTexture;
-  ceiling: THREE.CanvasTexture;
-  wallCtx: CanvasRenderingContext2D;
-  ceilCtx: CanvasRenderingContext2D;
-  /** Average colour of the upper and lower halves, for lighting the room. */
-  sky: THREE.Color;
-  ground: THREE.Color;
-}
-
-export interface WallOptions {
-  width: number;
-  depth: number;
-  height: number;
-  walls: RoomConfig['walls'];
-  ceiling: 'screen' | 'solid';
-  worlds: Record<string, WorldDef>;
-  initial: string;
-  /** Multiplies how strongly the screens light the room. */
-  lightMultiplier: number;
-}
-
-export interface WallScreens {
-  group: THREE.Group;
-  /** Light cast into the room by whatever the screens are showing. */
-  light: THREE.HemisphereLight;
-  show(world: string, instant?: boolean): void;
-  /** True while the screens are switching from one place to another. */
-  busy(): boolean;
-  update(t: number, dt: number, reducedMotion: boolean): void;
-  dispose(): void;
-}
-
-/* ------------------------------- the screens ------------------------------- */
-
-export function createWallScreens(opts: WallOptions): WallScreens {
-  const { width: W, depth: D, height: H, walls: params, worlds } = opts;
-  const perimeter = (W + D) * 2;
-  const ceilH = Math.max(8, Math.round((CEIL_W * D) / W));
+export function createWallScreens(initial: WorldId): WallScreens {
   const disposables: { dispose(): void }[] = [];
-  const cache = new Map<string, Loaded>();
+  const cache = new Map<WorldId, Loaded>();
+
+  const TEX_W = PANORAMA.w * PANORAMA_SCALE;
+  const TEX_H = PANORAMA.h * PANORAMA_SCALE;
   let disposed = false;
-  let preloadTimer = 0;
-  // Set once the material exists; re-lights the room after a picture arrives.
-  let onPictureLoaded = () => {};
+  // Set once the material exists; re-lights the room after a photo arrives.
+  let onImageLoaded = () => {};
 
-  const fallbackId = worlds[opts.initial] ? opts.initial : Object.keys(worlds)[0];
-  const defOf = (id: string): WorldDef => worlds[id] ?? worlds[fallbackId];
-
-  /* ---- the ceiling: the walls' top edge, carried inwards ---- */
-
-  const topRow = new Float32Array(TEX_W * 3);
-
-  const readTopRow = (ctx: CanvasRenderingContext2D) => {
-    const band = Math.max(4, Math.round(TEX_H * 0.06));
-    const { data } = ctx.getImageData(0, 0, TEX_W, band);
-    const raw = new Float32Array(TEX_W * 3);
-    for (let x = 0; x < TEX_W; x++) {
-      for (let y = 0; y < band; y++) {
-        const i = (y * TEX_W + x) * 4;
-        raw[x * 3] += data[i];
-        raw[x * 3 + 1] += data[i + 1];
-        raw[x * 3 + 2] += data[i + 2];
-      }
-    }
-    // Blur sideways, so a single bright column does not streak across the roof.
-    const r = 8;
-    for (let x = 0; x < TEX_W; x++) {
-      for (let c = 0; c < 3; c++) {
-        let sum = 0;
-        for (let k = -r; k <= r; k++) sum += raw[((x + k + TEX_W) % TEX_W) * 3 + c];
-        topRow[x * 3 + c] = sum / (2 * r + 1) / band;
-      }
-    }
-  };
-
-  const fillCeilingFromWalls = (ctx: CanvasRenderingContext2D) => {
-    const image = ctx.createImageData(CEIL_W, ceilH);
-    const col = (u: number, c: number) => topRow[(Math.floor((u % 1) * TEX_W) % TEX_W) * 3 + c];
-    for (let py = 0; py < ceilH; py++) {
-      const z = D / 2 - ((py + 0.5) / ceilH) * D; // row 0 is the south edge
-      for (let px = 0; px < CEIL_W; px++) {
-        const x = ((px + 0.5) / CEIL_W) * W - W / 2;
-        const sides = [
-          { d: z + D / 2, u: (x + W / 2) / perimeter }, // north
-          { d: W / 2 - x, u: (W + (z + D / 2)) / perimeter }, // east
-          { d: D / 2 - z, u: (W + D + (W / 2 - x)) / perimeter }, // south
-          { d: x + W / 2, u: (2 * W + D + (D / 2 - z)) / perimeter }, // west
-        ];
-        let sum = 0;
-        let r = 0;
-        let g = 0;
-        let b = 0;
-        for (const s of sides) {
-          const w = 1 / Math.pow(s.d + 0.35, 3);
-          sum += w;
-          r += w * col(s.u, 0);
-          g += w * col(s.u, 1);
-          b += w * col(s.u, 2);
-        }
-        const i = (py * CEIL_W + px) * 4;
-        image.data[i] = r / sum;
-        image.data[i + 1] = g / sum;
-        image.data[i + 2] = b / sum;
-        image.data[i + 3] = 255;
-      }
-    }
-    ctx.putImageData(image, 0, 0);
-  };
-
-  /* ---- loading a place ---- */
-
+  /** Read the average colours of whatever is on the canvas now. */
   const measure = (ctx: CanvasRenderingContext2D, into: Loaded) => {
     const { data } = ctx.getImageData(0, 0, TEX_W, TEX_H);
     const half = Math.floor(TEX_H / 2) * TEX_W * 4;
@@ -301,185 +196,164 @@ export function createWallScreens(opts: WallOptions): WallScreens {
     into.ground.copy(averageColor(data, half, data.length));
   };
 
-  const makeTexture = (canvas: HTMLCanvasElement, wrap: boolean) => {
+  /** Average colours of the upper and lower halves of an HDRI, as the room will see it. */
+  const measureHdr = (hdr: THREE.Texture, exposure: number, into: Loaded) => {
+    const { data, width, height } = hdr.image as { data: Uint16Array | Float32Array; width: number; height: number };
+    const half = data instanceof Uint16Array;
+    const read = (i: number) => (half ? THREE.DataUtils.fromHalfFloat(data[i]) : data[i]);
+    const sums = [
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+    ];
+    for (let y = 0; y < height; y += 4) {
+      const part = sums[y < height / 2 ? 0 : 1];
+      for (let x = 0; x < width; x += 8) {
+        const i = (y * width + x) * 4;
+        for (let c = 0; c < 3; c++) part[c] += 1 - Math.exp(-read(i + c) * exposure);
+        part[3]++;
+      }
+    }
+    const average = (p: number[]) => new THREE.Color().setRGB(p[0] / p[3], p[1] / p[3], p[2] / p[3], THREE.LinearSRGBColorSpace);
+    into.sky.copy(average(sums[0]));
+    into.ground.copy(average(sums[1]));
+  };
+
+  const load = (id: WorldId): Loaded => {
+    const cached = cache.get(id);
+    if (cached) return cached;
+    const env = ENVIRONMENTS[id];
+    const canvas = document.createElement('canvas');
+    canvas.width = TEX_W;
+    canvas.height = TEX_H;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    ctx.save();
+    ctx.scale(PANORAMA_SCALE, PANORAMA_SCALE);
+    env.paint(ctx);
+    ctx.restore();
+
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    if (wrap) texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapS = THREE.RepeatWrapping;
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.LinearFilter;
     texture.generateMipmaps = false;
     disposables.push(texture);
-    return texture;
-  };
-
-  /** Rebuild the ceiling for a place from whatever is on its wall canvas now. */
-  const refreshCeiling = (loaded: Loaded, def: WorldDef) => {
-    if (opts.ceiling !== 'screen') return;
-    const finish = () => {
-      loaded.ceiling.needsUpdate = true;
-    };
-    if (def.ceilingUrl) {
-      void loadImage(def.ceilingUrl).then((img) => {
-        if (disposed) return;
-        if (img) {
-          // Cover the roof with the picture.
-          const c = loaded.ceilCtx;
-          const aspect = CEIL_W / ceilH;
-          let sw = img.width;
-          let sh = img.height;
-          if (img.width / img.height > aspect) sw = img.height * aspect;
-          else sh = img.width / aspect;
-          c.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, CEIL_W, ceilH);
-        } else {
-          readTopRow(loaded.wallCtx);
-          fillCeilingFromWalls(loaded.ceilCtx);
-        }
-        finish();
-      });
-      return;
-    }
-    readTopRow(loaded.wallCtx);
-    fillCeilingFromWalls(loaded.ceilCtx);
-    finish();
-  };
-
-  const load = (id: string): Loaded => {
-    const cached = cache.get(id);
-    if (cached) return cached;
-    const def = defOf(id);
-
-    const wallCanvas = document.createElement('canvas');
-    wallCanvas.width = TEX_W;
-    wallCanvas.height = TEX_H;
-    const wallCtx = wallCanvas.getContext('2d', { willReadFrequently: true })!;
-    if (def.paint) {
-      wallCtx.save();
-      wallCtx.scale(PANORAMA_SCALE, PANORAMA_SCALE);
-      def.paint(wallCtx);
-      wallCtx.restore();
-    } else {
-      wallCtx.fillStyle = '#1a1e2a';
-      wallCtx.fillRect(0, 0, TEX_W, TEX_H);
-    }
-
-    const ceilCanvas = document.createElement('canvas');
-    ceilCanvas.width = CEIL_W;
-    ceilCanvas.height = ceilH;
-    const ceilCtx = ceilCanvas.getContext('2d', { willReadFrequently: true })!;
-
-    const loaded: Loaded = {
-      wall: makeTexture(wallCanvas, true),
-      ceiling: makeTexture(ceilCanvas, false),
-      wallCtx,
-      ceilCtx,
-      sky: new THREE.Color(),
-      ground: new THREE.Color(),
-    };
-    measure(wallCtx, loaded);
-    refreshCeiling(loaded, def);
+    const loaded: Loaded = { texture, mode: 0, sky: new THREE.Color(), ground: new THREE.Color() };
+    measure(ctx, loaded);
     cache.set(id, loaded);
 
-    if (def.image?.url) {
-      // Swap the drawing for the picture once it arrives. If it never does,
+    const url = RS.worldHdri[id] || env.hdri;
+    if (url) {
+      // Swap the drawing for the HDRI once it arrives. If it never does,
       // the drawing simply stays.
-      const spec = def.image.spec;
-      void loadImage(def.image.url).then((img) => {
-        if (disposed || !img) return;
-        drawSpec(wallCtx, img, spec);
-        measure(wallCtx, loaded);
-        loaded.wall.needsUpdate = true;
-        refreshCeiling(loaded, def);
-        onPictureLoaded();
-      });
+      new HDRLoader().load(
+        /^https?:/.test(url) ? url : withBase(url),
+        (hdr) => {
+          if (disposed) {
+            hdr.dispose();
+            return;
+          }
+          hdr.wrapS = THREE.RepeatWrapping;
+          hdr.wrapT = THREE.ClampToEdgeWrapping;
+          hdr.generateMipmaps = false;
+          hdr.minFilter = THREE.LinearFilter;
+          hdr.magFilter = THREE.LinearFilter;
+          disposables.push(hdr);
+          measureHdr(hdr, RS.worldExposure[id], loaded);
+          loaded.texture = hdr;
+          loaded.mode = 1;
+          onImageLoaded();
+        },
+      );
     }
     return loaded;
   };
 
-  const tintFor = (id: string) => {
-    const useClock = defOf(id).followsClock && params.timeOfDay !== 'off';
-    const [r, g, b] = useClock ? timeOfDayTint(params.timeOfDay === 'fixed' ? params.fixedHour : undefined) : [1, 1, 1];
+  const tintFor = (id: WorldId) => {
+    const [r, g, b] = ENVIRONMENTS[id].followsClock ? timeOfDayTint() : [1, 1, 1];
     return new THREE.Color(r, g, b);
   };
 
-  let from = fallbackId;
-  let to = fallbackId;
+  let from = initial;
+  let to = initial;
   let progress = 1; // 1 = settled on "to"
 
-  /* ---- materials: one for the walls, one for the ceiling ---- */
-
-  // These are shared, so both surfaces switch and flicker as one.
-  const shared = {
-    uMix: { value: 1 },
-    uGlitch: { value: 0 },
-    uTime: { value: 0 },
-    uMotion: { value: 1 },
-    uTintFrom: { value: tintFor(fallbackId) },
-    uTintTo: { value: tintFor(fallbackId) },
-    uPanelSize: { value: params.panel },
-    uSeam: { value: params.seams },
-    uGrid: { value: params.grid },
-    uSat: { value: params.saturation },
-    uBright: { value: params.brightness },
-    uFlicker: { value: params.flicker },
-    uDead: { value: params.deadPanel ? 1 : 0 },
-    uRoll: { value: params.rollBand ? 1 : 0 },
-  };
-
-  const first = load(fallbackId);
-  const wallMaterial = new THREE.ShaderMaterial({
+  const first = load(initial);
+  const material = new THREE.ShaderMaterial({
     uniforms: {
-      ...shared,
-      tFrom: { value: first.wall },
-      tTo: { value: first.wall },
-      uPanels: { value: new THREE.Vector2(perimeter / params.panel, H / params.panel) },
+      tFrom: { value: first.texture },
+      tTo: { value: first.texture },
+      uModeFrom: { value: first.mode },
+      uModeTo: { value: first.mode },
+      uYawFrom: { value: RS.worldYaw[initial] / 360 },
+      uYawTo: { value: RS.worldYaw[initial] / 360 },
+      uExpFrom: { value: RS.worldExposure[initial] },
+      uExpTo: { value: RS.worldExposure[initial] },
+      uSat: { value: RS.wallSaturation },
+      uBright: { value: RS.wallBrightness },
+      uSeam: { value: RS.seamStrength },
+      uGrid: { value: RS.gridStrength },
+      uDrop: { value: RS.dropoutRate },
+      uDead: { value: RS.deadPanel ? 1 : 0 },
+      uRollBand: { value: RS.rollBand },
+      uMix: { value: 1 },
+      uGlitch: { value: 0 },
+      uTime: { value: 0 },
+      uMotion: { value: 1 },
+      uTintFrom: { value: tintFor(initial) },
+      uTintTo: { value: tintFor(initial) },
+      uPanels: { value: new THREE.Vector2(PERIMETER / RS.panelSize, ROOM.height / RS.panelSize) },
+      uPanelSize: { value: RS.panelSize },
+      uRoom: { value: new THREE.Vector2(ROOM.width, ROOM.depth) },
     },
     vertexShader,
     fragmentShader,
   });
+  disposables.push(material);
+
+  // The ceiling uses the same pictures and uniforms, mapped from above.
   const ceilingMaterial = new THREE.ShaderMaterial({
-    uniforms: {
-      ...shared,
-      tFrom: { value: first.ceiling },
-      tTo: { value: first.ceiling },
-      uPanels: { value: new THREE.Vector2(W / params.panel, D / params.panel) },
-    },
+    uniforms: material.uniforms,
     vertexShader,
     fragmentShader,
+    defines: { CEILING: '' },
   });
-  disposables.push(wallMaterial, ceilingMaterial);
+  disposables.push(ceilingMaterial);
 
+  // One plane per wall. Their texture coordinates run on from each other,
+  // so the panorama wraps the room without a break: north, east, south, west.
   const group = new THREE.Group();
-  const halfW = W / 2;
-  const halfD = D / 2;
-  const sides: { length: number; x: number; z: number; rotationY: number }[] = [
-    { length: W, x: 0, z: -halfD, rotationY: 0 },
-    { length: D, x: halfW, z: 0, rotationY: -Math.PI / 2 },
-    { length: W, x: 0, z: halfD, rotationY: Math.PI },
-    { length: D, x: -halfW, z: 0, rotationY: Math.PI / 2 },
+  const halfW = ROOM.width / 2;
+  const halfD = ROOM.depth / 2;
+  const walls: { length: number; x: number; z: number; rotationY: number }[] = [
+    { length: ROOM.width, x: 0, z: -halfD, rotationY: 0 },
+    { length: ROOM.depth, x: halfW, z: 0, rotationY: -Math.PI / 2 },
+    { length: ROOM.width, x: 0, z: halfD, rotationY: Math.PI },
+    { length: ROOM.depth, x: -halfW, z: 0, rotationY: Math.PI / 2 },
   ];
   let start = 0;
-  for (const side of sides) {
-    const geometry = new THREE.PlaneGeometry(side.length, H);
+  for (const wall of walls) {
+    const geometry = new THREE.PlaneGeometry(wall.length, ROOM.height);
     const uv = geometry.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setX(i, (start + uv.getX(i) * side.length) / perimeter);
+    for (let i = 0; i < uv.count; i++) {
+      uv.setX(i, (start + uv.getX(i) * wall.length) / PERIMETER);
+    }
     disposables.push(geometry);
-    const mesh = new THREE.Mesh(geometry, wallMaterial);
-    mesh.position.set(side.x, H / 2, side.z);
-    mesh.rotation.y = side.rotationY;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(wall.x, ROOM.height / 2, wall.z);
+    mesh.rotation.y = wall.rotationY;
     group.add(mesh);
-    start += side.length;
+    start += wall.length;
   }
 
-  if (opts.ceiling === 'screen') {
-    const geometry = new THREE.PlaneGeometry(W, D);
+  if (RS.ceilingProjection) {
+    const geometry = new THREE.PlaneGeometry(ROOM.width, ROOM.depth);
     disposables.push(geometry);
-    const roof = new THREE.Mesh(geometry, ceilingMaterial);
-    roof.rotation.x = Math.PI / 2; // face downwards
-    roof.position.set(0, H - 0.002, 0);
-    group.add(roof);
+    const ceiling = new THREE.Mesh(geometry, ceilingMaterial);
+    ceiling.position.set(0, ROOM.height - 0.002, 0);
+    ceiling.rotation.x = Math.PI / 2;
+    group.add(ceiling);
   }
-
-  /* ---- lighting from what the screens show ---- */
 
   const light = new THREE.HemisphereLight('#ffffff', '#ffffff', 1);
   const scratchSky = new THREE.Color();
@@ -488,59 +362,70 @@ export function createWallScreens(opts: WallOptions): WallScreens {
   const applyLight = () => {
     const a = load(from);
     const b = load(to);
-    const mix = shared.uMix.value;
-    scratchSky.copy(a.sky).multiply(shared.uTintFrom.value);
-    light.color.copy(b.sky).multiply(shared.uTintTo.value).lerp(scratchSky, 1 - mix);
-    scratchGround.copy(a.ground).multiply(shared.uTintFrom.value);
-    light.groundColor.copy(b.ground).multiply(shared.uTintTo.value).lerp(scratchGround, 1 - mix);
-    light.intensity = (defOf(from).light * (1 - mix) + defOf(to).light * mix) * opts.lightMultiplier;
+    const mix = material.uniforms.uMix.value as number;
+    const tintA = material.uniforms.uTintFrom.value as THREE.Color;
+    const tintB = material.uniforms.uTintTo.value as THREE.Color;
+    scratchSky.copy(a.sky).multiply(tintA);
+    light.color.copy(b.sky).multiply(tintB).lerp(scratchSky, 1 - mix);
+    scratchGround.copy(a.ground).multiply(tintA);
+    light.groundColor.copy(b.ground).multiply(tintB).lerp(scratchGround, 1 - mix);
+    light.intensity = ENVIRONMENTS[from].light * (1 - mix) + ENVIRONMENTS[to].light * mix;
   };
   applyLight();
-  onPictureLoaded = applyLight;
+  /** Point the shader at the pictures for the current places (they may just have arrived). */
+  const sync = () => {
+    const a = load(from);
+    const b = load(to);
+    const u = material.uniforms;
+    u.tFrom.value = a.texture;
+    u.tTo.value = b.texture;
+    u.uModeFrom.value = a.mode;
+    u.uModeTo.value = b.mode;
+    u.uYawFrom.value = RS.worldYaw[from] / 360;
+    u.uYawTo.value = RS.worldYaw[to] / 360;
+    u.uExpFrom.value = RS.worldExposure[from];
+    u.uExpTo.value = RS.worldExposure[to];
+  };
+  onImageLoaded = () => {
+    sync();
+    applyLight();
+  };
 
-  // Get every other place ready shortly after, so switching never waits.
-  preloadTimer = window.setTimeout(() => Object.keys(worlds).forEach(load), 500);
-
-  const glitchSeconds = params.glitchSeconds;
+  // Fetch every place now, so switching never waits on a download.
+  (Object.keys(ENVIRONMENTS) as WorldId[]).forEach(load);
 
   return {
     group,
     light,
     show(world, instant = false) {
-      const next = worlds[world] ? world : fallbackId;
-      if (next === to) return;
-      // Start from whatever is on the screens right now.
+      if (world === to) return;
+      // Start from whatever is on the walls right now.
       from = progress >= 0.5 ? to : from;
-      to = next;
+      to = world;
       progress = instant ? 1 : 0;
-      const a = load(from);
-      const b = load(to);
-      wallMaterial.uniforms.tFrom.value = a.wall;
-      wallMaterial.uniforms.tTo.value = b.wall;
-      ceilingMaterial.uniforms.tFrom.value = a.ceiling;
-      ceilingMaterial.uniforms.tTo.value = b.ceiling;
-      shared.uTintFrom.value.copy(tintFor(from));
-      shared.uTintTo.value.copy(tintFor(to));
-      shared.uMix.value = instant ? 1 : 0;
-      shared.uGlitch.value = 0;
+      (material.uniforms.uTintFrom.value as THREE.Color).copy(tintFor(from));
+      (material.uniforms.uTintTo.value as THREE.Color).copy(tintFor(to));
+      sync();
+      material.uniforms.uMix.value = instant ? 1 : 0;
+      material.uniforms.uGlitch.value = 0;
       applyLight();
     },
     busy() {
       return progress < 1;
     },
     update(t, dt, reducedMotion) {
-      shared.uTime.value = t;
-      shared.uMotion.value = reducedMotion ? 0 : 1;
+      material.uniforms.uTime.value = t;
+      material.uniforms.uMotion.value = reducedMotion ? 0 : 1;
       if (progress >= 1) return;
-      progress = Math.min(1, progress + dt / glitchSeconds);
-      shared.uMix.value = THREE.MathUtils.smoothstep(progress, 0.35, 0.65);
+      progress = Math.min(1, progress + dt / RS.wallSwitchSeconds);
+      const mix = THREE.MathUtils.smoothstep(progress, 0.35, 0.65);
+      material.uniforms.uMix.value = mix;
       // Reduced motion: a plain cross-fade, no tearing or static.
-      shared.uGlitch.value = reducedMotion ? 0 : Math.sin(progress * Math.PI);
+      material.uniforms.uGlitch.value = reducedMotion ? 0 : Math.sin(progress * Math.PI) * RS.glitchStrength;
       applyLight();
     },
     dispose() {
       disposed = true;
-      window.clearTimeout(preloadTimer);
       disposables.forEach((d) => d.dispose());
       light.dispose();
     },

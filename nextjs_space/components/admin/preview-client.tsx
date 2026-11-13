@@ -3,13 +3,16 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { RoomCanvas } from '@/components/room/room-canvas';
 import { PortfolioClient } from '@/components/portfolio-client';
 import { ProjectPageClient } from '@/components/project-page-client';
 import { DRAFT_KEY, readDraft, setPreviewContent, useSiteContent } from '@/lib/preview';
 
 /** Shows the admin page's unpublished draft with the real site's pages. */
 export function PreviewClient() {
-  const slug = useSearchParams().get('project');
+  const params = useSearchParams();
+  const slug = params.get('project');
+  const room = params.get('view') === 'room';
   const [state, setState] = useState<{ hasDraft: boolean; version: number } | null>(null);
   const content = useSiteContent();
 
@@ -41,7 +44,9 @@ export function PreviewClient() {
 
   return (
     <div key={state.version}>
-      {slug && index === -1 ? (
+      {room ? (
+        <RoomCanvas />
+      ) : slug && index === -1 ? (
         <p className="min-h-screen bg-[#0a0c04] p-10 text-[#c8d4a8]">There is no project with the address &quot;{slug}&quot; in this draft.</p>
       ) : slug ? (
         <ProjectPageClient item={items[index]} previous={pick(index - 1)} next={pick(index + 1)} />
@@ -50,7 +55,7 @@ export function PreviewClient() {
       )}
       <div
         role="status"
-        className="fixed bottom-4 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-3 rounded-full border border-[#94a348] bg-[#0d0f06]/95 px-4 py-2 text-xs text-[#f3f7e4] shadow-lg"
+        className={`fixed left-1/2 z-[70] ${room ? 'top-3' : 'bottom-4'} flex -translate-x-1/2 items-center gap-3 rounded-full border border-[#94a348] bg-[#0d0f06]/95 px-4 py-2 text-xs text-[#f3f7e4] shadow-lg`}
       >
         <span className="font-semibold uppercase tracking-wider text-[#94a348]">Preview</span>
         <span>{state.hasDraft ? 'Not published yet' : 'No unpublished changes'}</span>
