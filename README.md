@@ -46,43 +46,12 @@ for a project cover. Large images are the main thing that makes a site slow.
 
 ## Changing the room: the admin page
 
-The room has its own control panel at `/room/admin/` (on the live site:
-<https://flamingairplane.github.io/Personal-Website/room/admin/>). It shows the
-room on one side, updating as you change things, and the controls on the other.
-
-What you can change:
-
-- **Items**: move, turn, resize or hide any object; swap it for your own `.glb`
-  3D model; add your own pictures and models; and decide what happens when
-  each item is looked at (a line of text, a card with title, text, picture and
-  link, and its own background picture for the walls).
-- **Places**: the pictures the walls show. Rename or re-light the built-in ones,
-  or add your own from any photo.
-- **Room, Player, Look, Light, Screens, Words**: the size of the room, how
-  fast you walk, how chunky the pixels are, the colour palette, how the panels
-  flicker and glitch, the fog, and every piece of text.
-
-The admin has no password because it cannot change the website. It edits a
-**draft that lives in your browser**, and the pictures and models you import
-are kept there too. To publish:
-
-1. Open the **Publish** tab and press **Download bundle**.
-2. Unzip it into `nextjs_space/public/`. It adds `room/room-config.json` and
-   your files under `room/assets/`.
-3. Commit and push, as for any other change.
-
-Visitors always see the published settings. To look at your draft in the real
-room, use **Open draft in the room** (it only works in the browser that made
-the draft).
-
-Notes on files you import:
-
-- Models must be single-file `.glb`. A few MB is plenty. Models stand on the
-  object's spot, and "Height" scales them to a size in metres.
-- Pictures are shrunk to 2560 pixels on import. The room is drawn at low
-  resolution, so bigger pictures only add weight.
-- The room's walls repeat one wide picture all the way round. For an ordinary
-  photo, set "Times it repeats around the room" to 4 to get one per wall.
+The room is edited in the **Room tab** of the main admin at
+`/Personal-Website/admin/`: room size, player, look, light, screens and
+ceiling, and for each object its name, line, scenery and the content panel it
+opens. Options another object already opens are shown greyed out (still
+selectable). Changes are saved to `content/site-content.json` like everything
+else. Importing your own models and pictures is not in this admin yet.
 
 ## Running it on your computer
 
@@ -133,15 +102,9 @@ nextjs_space/
     wall-screens.ts      the walls, which are screens
     environments.ts      the places the walls can show
     pathfinding.ts       walking around furniture
-    config.ts            every setting the room has, with defaults and checks
-    config-schema.ts     which settings the admin page shows, and how
-    models.ts            loading your own .glb models
-    assets.ts            files imported in the admin (kept in the browser)
-    export-bundle.ts     the zip the admin's Publish tab makes
+    room-settings.ts     the room's settings, set from the admin
     crush-pass.ts        the low-resolution, limited-palette look
-  components/room/admin/  the admin page
   public/              images and other files served as they are
-  public/room/         room-config.json: the published room settings
 SITE_AUDIT.md          the last full review: what was fixed, what is waiting on you
 ```
 
