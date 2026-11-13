@@ -84,6 +84,8 @@ export function ProjectForm({
           }
         />
         <Field label="Project Link" value={item.projectLink} onChange={(v) => set('projectLink', v)} placeholder="https://... (# for none)" hint="Defaults to the YouTube link when empty or #." />
+        <Field label="Embed Link (plays inside the room)" value={item.embedUrl ?? ''} onChange={(v) => set('embedUrl', v.trim())} placeholder="https://..." hint="Optional. A web game shown in the room's arcade machine." />
+        <Field label="Source Code Link" value={item.sourceUrl ?? ''} onChange={(v) => set('sourceUrl', v.trim())} placeholder="https://github.com/..." hint="Optional. Shown as a View Code link in the room." />
         <Field label="Tags" value={item.tags} onChange={(v) => set('tags', v)} placeholder="Unity, C#, 3D" hint="Separate with commas." />
         <Field
           label="URL Slug (for the project page)"

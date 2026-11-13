@@ -2,8 +2,9 @@
 // all the way around the room: north wall first, then east, south and west.
 //
 // Each has a drawing made in code, which shows at once. If it also names an
-// `image`, that photo replaces the drawing as soon as it has loaded. Photos
-// live in public/images/room/ and are 2080 x 240 pixels (see CREDITS.txt).
+// `hdri`, that equirectangular HDRI replaces the drawing as soon as it has
+// loaded, and is seen through the walls and ceiling like windows. HDRIs live
+// in public/hdri/ (see CREDITS.txt there).
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -23,8 +24,8 @@ export interface Environment {
   followsClock: boolean;
   /** Stand-in drawing, shown until the photo (if any) has loaded. */
   paint(ctx: Ctx): void;
-  /** Site-relative path to a panorama photo. */
-  image?: string;
+  /** Site-relative path to an equirectangular HDRI (.hdr) shown outside. */
+  hdri?: string;
 }
 
 /** What the walls show with the lights off. */
@@ -188,10 +189,10 @@ function paintCity(ctx: Ctx) {
 }
 
 export const ENVIRONMENTS: Record<WorldId, Environment> = {
-  nebula: { id: 'nebula', label: 'Nebula', light: 1.3, followsClock: false, paint: paintNebula },
-  forest: { id: 'forest', label: 'Forest', light: 4.2, followsClock: true, paint: paintForest, image: '/images/room/forest.jpg' },
-  sunset: { id: 'sunset', label: 'Sunset', light: 3.0, followsClock: false, paint: paintSunset, image: '/images/room/sunset.jpg' },
-  city: { id: 'city', label: 'City at night', light: 3.0, followsClock: false, paint: paintCity, image: '/images/room/city.jpg' },
+  nebula: { id: 'nebula', label: 'Nebula', light: 1.3, followsClock: false, paint: paintNebula, hdri: '/hdri/nebula.hdr' },
+  forest: { id: 'forest', label: 'Forest', light: 4.2, followsClock: true, paint: paintForest, hdri: '/hdri/forest.hdr' },
+  sunset: { id: 'sunset', label: 'Sunset', light: 3.0, followsClock: false, paint: paintSunset, hdri: '/hdri/sunset.hdr' },
+  city: { id: 'city', label: 'City at night', light: 3.0, followsClock: false, paint: paintCity, hdri: '/hdri/city.hdr' },
 };
 
 /**

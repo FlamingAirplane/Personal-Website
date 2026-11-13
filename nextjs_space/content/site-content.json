@@ -154,7 +154,7 @@
       "year": 2026,
       "type": "sound",
       "tags": "Sound Replacement",
-      "sortOrder": 8
+      "sortOrder": 9
     },
     {
       "id": "grime-go-away",
@@ -167,7 +167,22 @@
       "year": 2025,
       "type": "sound",
       "tags": "Sound Design,SFX",
-      "sortOrder": 9
+      "sortOrder": 10
+    },
+    {
+      "id": "lunagolem",
+      "slug": "lunagolem",
+      "title": "LunaGolem",
+      "category": "Game Design, Art & Tech (Game Jam)",
+      "description": "Aim and fire as LunaGolem, descending a dungeon on the moon and absorbing one element at a time from glowing fields. Built in a one-day browser game jam with three.js.",
+      "imageUrl": "",
+      "projectLink": "https://flamingairplane.github.io/jab-jam-game/",
+      "embedUrl": "https://flamingairplane.github.io/jab-jam-game/",
+      "sourceUrl": "https://github.com/FlamingAirplane/jab-jam-game",
+      "year": 2026,
+      "type": "game",
+      "tags": "Game Jam,three.js,Shooter,Browser Game",
+      "sortOrder": 8
     }
   ],
   "workHistory": [
@@ -255,6 +270,12 @@
     "colorWood": "#7a4a30",
     "colorTrim": "#4d2f22",
     "colorBezel": "#0b0d18",
-    "hotspots": {}
+    "hotspots": {},
+    "worldExposure": {
+      "nebula": 0.5,
+      "forest": 1,
+      "sunset": 1,
+      "city": 1
+    }
   }
 }

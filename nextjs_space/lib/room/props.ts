@@ -171,7 +171,7 @@ export function addProps(kit: Kit): Props {
     box(glow('#7fd4d8'), 0.006, 0.012, 0.012, eastX - 0.323, DESK_TOP + 0.03, z + 0.07); // power light
   }
 
-  /* --------------------- couch, facing the cinema screen ------------------ */
+  /* ----------------------- couch, facing the big TV ----------------------- */
 
   const couch = lambert('#2e2a6b');
   const cushion = lambert('#4a3a8c');

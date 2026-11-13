@@ -4,6 +4,7 @@
 // place changes the whole wall tears into static for a moment.
 
 import * as THREE from 'three';
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { withBase } from '../site';
 import { ENVIRONMENTS, PANORAMA, PANORAMA_SCALE, timeOfDayTint, type WorldId } from './environments';
 import { ROOM } from './room-data';
@@ -27,6 +28,19 @@ const fragmentShader = /* glsl */ `
 
   uniform sampler2D tFrom;
   uniform sampler2D tTo;
+  uniform float uModeFrom;   // 1 = HDRI seen through the walls, 0 = drawn strip
+  uniform float uModeTo;
+  uniform float uYawFrom;    // turns of the HDRI
+  uniform float uYawTo;
+  uniform float uExpFrom;
+  uniform float uExpTo;
+  uniform float uSat;
+  uniform float uBright;
+  uniform float uSeam;
+  uniform float uGrid;
+  uniform float uDrop;
+  uniform float uDead;
+  uniform float uRollBand;
   uniform float uMix;        // 0 = old place, 1 = new place
   uniform float uGlitch;     // 0..1, peaks mid-switch
   uniform float uTime;
@@ -42,6 +56,16 @@ const fragmentShader = /* glsl */ `
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+
+  // One picture, in either of its two forms. An HDRI is looked at along the line
+  // from the viewer through this bit of wall, like a window onto a far-away place.
+  vec3 envSample(sampler2D t, float mode, float yaw, float exposure, vec2 strip, vec2 hdri, float dx) {
+    if (mode > 0.5) {
+      vec3 c = texture2D(t, hdri + vec2(yaw + dx, 0.0)).rgb;
+      return vec3(1.0) - exp(-c * exposure);
+    }
+    return texture2D(t, strip + vec2(dx, 0.0)).rgb;
   }
 
   void main() {
@@ -62,21 +86,23 @@ const fragmentShader = /* glsl */ `
 
     // Colour channels come apart a little during the switch.
     float split = 0.004 * uGlitch;
+    vec3 dir = normalize(vWorld - cameraPosition);
+    vec2 hdri = vec2(atan(dir.x, -dir.z) / 6.2831853 + 0.5 + tear, asin(clamp(dir.y, -1.0, 1.0)) / 3.1415927 + 0.5);
     vec3 from = vec3(
-      texture2D(tFrom, uv + vec2(split, 0.0)).r,
-      texture2D(tFrom, uv).g,
-      texture2D(tFrom, uv - vec2(split, 0.0)).b
+      envSample(tFrom, uModeFrom, uYawFrom, uExpFrom, uv, hdri, split).r,
+      envSample(tFrom, uModeFrom, uYawFrom, uExpFrom, uv, hdri, 0.0).g,
+      envSample(tFrom, uModeFrom, uYawFrom, uExpFrom, uv, hdri, -split).b
     ) * uTintFrom;
     vec3 to = vec3(
-      texture2D(tTo, uv + vec2(split, 0.0)).r,
-      texture2D(tTo, uv).g,
-      texture2D(tTo, uv - vec2(split, 0.0)).b
+      envSample(tTo, uModeTo, uYawTo, uExpTo, uv, hdri, split).r,
+      envSample(tTo, uModeTo, uYawTo, uExpTo, uv, hdri, 0.0).g,
+      envSample(tTo, uModeTo, uYawTo, uExpTo, uv, hdri, -split).b
     ) * uTintTo;
     vec3 color = mix(from, to, uMix);
 
     // Photos go dull when snapped to the small palette; push the colour first.
     float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    color = max(mix(vec3(luma), color, 1.5), 0.0) * 1.2;
+    color = max(mix(vec3(luma), color, uSat), 0.0) * uBright;
 
     // Static.
     float grain = hash(floor(vUv * vec2(520.0, 60.0)) + floor(uTime * 30.0));
@@ -93,33 +119,35 @@ const fragmentShader = /* glsl */ `
 
     // Idle flicker: now and then one panel loses signal for a moment.
     float tick = floor(uTime * 2.0);
-    float dropout = step(0.9988, hash(panel + tick * 17.0)) * uMotion;
+    float dropout = step(1.0 - uDrop, hash(panel + tick * 17.0)) * uMotion;
     // One panel that never quite works.
-    float dead = step(abs(panel.x - 31.0) + abs(panel.y - 3.0), 0.5);
+    float dead = step(abs(panel.x - 31.0) + abs(panel.y - 3.0), 0.5) * uDead;
     float broken = max(dropout, dead);
     float snow = hash(floor(vUv * vec2(1040.0, 120.0)) + floor(uTime * 12.0) * uMotion);
     color = mix(color, vec3(snow * 0.08), broken * (dead > 0.5 ? 0.9 : 0.8));
 
     // A faint bright band rolling slowly down the wall.
     float roll = fract(vUv.y + uTime * 0.07);
-    color *= 1.0 + 0.06 * smoothstep(0.9, 1.0, roll) * uMotion;
+    color *= 1.0 + uRollBand * smoothstep(0.9, 1.0, roll) * uMotion;
 
     // Seams between panels, only visible from nearby.
     vec2 toEdge = min(inPanel, 1.0 - inPanel) * uPanelSize;
     float seam = 1.0 - smoothstep(0.004, 0.014, min(toEdge.x, toEdge.y));
-    color *= 1.0 - seam * 0.8 * (1.0 - smoothstep(1.6, 4.2, dist));
+    color *= 1.0 - seam * uSeam * (1.0 - smoothstep(1.6, 4.2, dist));
 
     // The pixel grid, only visible from very close.
     vec2 cell = fract(panelPos * 16.0);
     float grid = step(0.78, max(cell.x, cell.y));
-    color *= 1.0 - grid * 0.55 * (1.0 - smoothstep(0.7, 1.5, dist));
+    color *= 1.0 - grid * uGrid * (1.0 - smoothstep(0.7, 1.5, dist));
 
     gl_FragColor = vec4(color, 1.0);
   }
 `;
 
 interface Loaded {
-  texture: THREE.CanvasTexture;
+  texture: THREE.Texture;
+  /** 1 once the HDRI has arrived, 0 while the drawn stand-in shows. */
+  mode: number;
   /** Average colour of the upper and lower halves, for lighting the room. */
   sky: THREE.Color;
   ground: THREE.Color;
@@ -168,6 +196,28 @@ export function createWallScreens(initial: WorldId): WallScreens {
     into.ground.copy(averageColor(data, half, data.length));
   };
 
+  /** Average colours of the upper and lower halves of an HDRI, as the room will see it. */
+  const measureHdr = (hdr: THREE.Texture, exposure: number, into: Loaded) => {
+    const { data, width, height } = hdr.image as { data: Uint16Array | Float32Array; width: number; height: number };
+    const half = data instanceof Uint16Array;
+    const read = (i: number) => (half ? THREE.DataUtils.fromHalfFloat(data[i]) : data[i]);
+    const sums = [
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+    ];
+    for (let y = 0; y < height; y += 4) {
+      const part = sums[y < height / 2 ? 0 : 1];
+      for (let x = 0; x < width; x += 8) {
+        const i = (y * width + x) * 4;
+        for (let c = 0; c < 3; c++) part[c] += 1 - Math.exp(-read(i + c) * exposure);
+        part[3]++;
+      }
+    }
+    const average = (p: number[]) => new THREE.Color().setRGB(p[0] / p[3], p[1] / p[3], p[2] / p[3], THREE.LinearSRGBColorSpace);
+    into.sky.copy(average(sums[0]));
+    into.ground.copy(average(sums[1]));
+  };
+
   const load = (id: WorldId): Loaded => {
     const cached = cache.get(id);
     if (cached) return cached;
@@ -188,22 +238,33 @@ export function createWallScreens(initial: WorldId): WallScreens {
     texture.minFilter = THREE.LinearFilter;
     texture.generateMipmaps = false;
     disposables.push(texture);
-    const loaded: Loaded = { texture, sky: new THREE.Color(), ground: new THREE.Color() };
+    const loaded: Loaded = { texture, mode: 0, sky: new THREE.Color(), ground: new THREE.Color() };
     measure(ctx, loaded);
     cache.set(id, loaded);
 
-    if (env.image) {
-      // Swap the drawing for the photo once it arrives. If it never does,
+    const url = RS.worldHdri[id] || env.hdri;
+    if (url) {
+      // Swap the drawing for the HDRI once it arrives. If it never does,
       // the drawing simply stays.
-      const img = new Image();
-      img.onload = () => {
-        if (disposed) return;
-        ctx.drawImage(img, 0, 0, TEX_W, TEX_H);
-        measure(ctx, loaded);
-        texture.needsUpdate = true;
-        onImageLoaded();
-      };
-      img.src = withBase(env.image);
+      new HDRLoader().load(
+        /^https?:/.test(url) ? url : withBase(url),
+        (hdr) => {
+          if (disposed) {
+            hdr.dispose();
+            return;
+          }
+          hdr.wrapS = THREE.RepeatWrapping;
+          hdr.wrapT = THREE.ClampToEdgeWrapping;
+          hdr.generateMipmaps = false;
+          hdr.minFilter = THREE.LinearFilter;
+          hdr.magFilter = THREE.LinearFilter;
+          disposables.push(hdr);
+          measureHdr(hdr, RS.worldExposure[id], loaded);
+          loaded.texture = hdr;
+          loaded.mode = 1;
+          onImageLoaded();
+        },
+      );
     }
     return loaded;
   };
@@ -222,6 +283,19 @@ export function createWallScreens(initial: WorldId): WallScreens {
     uniforms: {
       tFrom: { value: first.texture },
       tTo: { value: first.texture },
+      uModeFrom: { value: first.mode },
+      uModeTo: { value: first.mode },
+      uYawFrom: { value: RS.worldYaw[initial] / 360 },
+      uYawTo: { value: RS.worldYaw[initial] / 360 },
+      uExpFrom: { value: RS.worldExposure[initial] },
+      uExpTo: { value: RS.worldExposure[initial] },
+      uSat: { value: RS.wallSaturation },
+      uBright: { value: RS.wallBrightness },
+      uSeam: { value: RS.seamStrength },
+      uGrid: { value: RS.gridStrength },
+      uDrop: { value: RS.dropoutRate },
+      uDead: { value: RS.deadPanel ? 1 : 0 },
+      uRollBand: { value: RS.rollBand },
       uMix: { value: 1 },
       uGlitch: { value: 0 },
       uTime: { value: 0 },
@@ -298,7 +372,24 @@ export function createWallScreens(initial: WorldId): WallScreens {
     light.intensity = ENVIRONMENTS[from].light * (1 - mix) + ENVIRONMENTS[to].light * mix;
   };
   applyLight();
-  onImageLoaded = applyLight;
+  /** Point the shader at the pictures for the current places (they may just have arrived). */
+  const sync = () => {
+    const a = load(from);
+    const b = load(to);
+    const u = material.uniforms;
+    u.tFrom.value = a.texture;
+    u.tTo.value = b.texture;
+    u.uModeFrom.value = a.mode;
+    u.uModeTo.value = b.mode;
+    u.uYawFrom.value = RS.worldYaw[from] / 360;
+    u.uYawTo.value = RS.worldYaw[to] / 360;
+    u.uExpFrom.value = RS.worldExposure[from];
+    u.uExpTo.value = RS.worldExposure[to];
+  };
+  onImageLoaded = () => {
+    sync();
+    applyLight();
+  };
 
   // Fetch every place now, so switching never waits on a download.
   (Object.keys(ENVIRONMENTS) as WorldId[]).forEach(load);
@@ -312,10 +403,9 @@ export function createWallScreens(initial: WorldId): WallScreens {
       from = progress >= 0.5 ? to : from;
       to = world;
       progress = instant ? 1 : 0;
-      material.uniforms.tFrom.value = load(from).texture;
-      material.uniforms.tTo.value = load(to).texture;
       (material.uniforms.uTintFrom.value as THREE.Color).copy(tintFor(from));
       (material.uniforms.uTintTo.value as THREE.Color).copy(tintFor(to));
+      sync();
       material.uniforms.uMix.value = instant ? 1 : 0;
       material.uniforms.uGlitch.value = 0;
       applyLight();
@@ -331,7 +421,7 @@ export function createWallScreens(initial: WorldId): WallScreens {
       const mix = THREE.MathUtils.smoothstep(progress, 0.35, 0.65);
       material.uniforms.uMix.value = mix;
       // Reduced motion: a plain cross-fade, no tearing or static.
-      material.uniforms.uGlitch.value = reducedMotion ? 0 : Math.sin(progress * Math.PI);
+      material.uniforms.uGlitch.value = reducedMotion ? 0 : Math.sin(progress * Math.PI) * RS.glitchStrength;
       applyLight();
     },
     dispose() {

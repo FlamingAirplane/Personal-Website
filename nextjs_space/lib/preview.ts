@@ -22,6 +22,11 @@ function previewAsset(path: string): string {
   return path.startsWith('/uploads/') ? `${RAW_BASE}${path}` : withBase(path);
 }
 
+/** Turns a site path (e.g. an upload) into an address, also while previewing. */
+export function useAsset(): (path: string) => string {
+  return useIsPreview() ? previewAsset : withBase;
+}
+
 /** Shows the given draft instead of the published content. Null goes back to the published content. */
 export function setPreviewContent(draft: SiteContent | null) {
   override = draft ? resolveContent(draft, previewAsset) : null;

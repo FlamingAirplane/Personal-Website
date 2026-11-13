@@ -43,6 +43,7 @@ function normalise(content: SiteContent): SiteContent {
 }
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
 
 function ordered<T extends { sortOrder?: number }>(items: T[]): T[] {
   return items
@@ -181,12 +182,13 @@ export function AdminClient() {
 
   const upload: Uploader = async (file) => {
     const isImage = file.type.startsWith('image/');
-    if (!isImage && file.type !== 'application/pdf') {
-      setNotice({ kind: 'error', text: 'Choose an image, or a PDF for the resume.' });
+    const isVideo = file.type.startsWith('video/');
+    if (!isImage && !isVideo && file.type !== 'application/pdf') {
+      setNotice({ kind: 'error', text: 'Choose an image, a video, or a PDF for the resume.' });
       return null;
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setNotice({ kind: 'error', text: 'That file is over 10 MB.' });
+    if (file.size > (isVideo ? MAX_VIDEO_BYTES : MAX_UPLOAD_BYTES)) {
+      setNotice({ kind: 'error', text: `That file is over ${isVideo ? 25 : 10} MB.` });
       return null;
     }
     try {
@@ -243,8 +245,14 @@ export function AdminClient() {
     }
     const youtubeUrl = project.youtubeUrl?.trim();
     const { youtubeUrl: _unused, ...rest } = project;
+    const embedUrl = project.embedUrl?.trim();
+    const sourceUrl = project.sourceUrl?.trim();
+    delete rest.embedUrl;
+    delete rest.sourceUrl;
     const saved: PortfolioItem = {
       ...rest,
+      ...(embedUrl ? { embedUrl } : {}),
+      ...(sourceUrl ? { sourceUrl } : {}),
       ...(youtubeUrl ? { youtubeUrl } : {}),
       id: project.id || slug,
       slug,
@@ -416,7 +424,7 @@ export function AdminClient() {
         )}
 
         {tab === 'profile' && <ProfilePanel profile={content.profile} busy={busy} onSave={saveProfile} upload={upload} preview={preview} />}
-        {tab === 'room' && <RoomSettingsPanel settings={content.roomSettings} busy={busy} onSave={saveRoom} onPreview={() => openPreview('room')} />}
+        {tab === 'room' && <RoomSettingsPanel settings={content.roomSettings} busy={busy} onSave={saveRoom} onPreview={() => openPreview('room')} upload={upload} />}
         {tab === 'settings' && <SettingsPanel titleText={content.profile.siteName} settings={content.siteSettings} busy={busy} onSave={saveSettings} />}
       </div>
     </div>

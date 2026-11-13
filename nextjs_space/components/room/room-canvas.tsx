@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { buildRoom } from '@/lib/room/build-room';
 import { createCrushPass } from '@/lib/room/crush-pass';
@@ -12,6 +12,8 @@ import { useSiteContent } from '@/lib/preview';
 import { rememberSiteMode } from '@/lib/site-mode';
 import { withBase } from '@/lib/site';
 import { RoomPanel } from './room-panel';
+import { TvPanel } from './tv-panel';
+import type { Room } from '@/lib/room/build-room';
 
 const LIT_KEY = 'room-lit';
 
@@ -29,6 +31,8 @@ interface Walk {
 interface RoomApi {
   visit(spot: Hotspot): void;
   highlight(id: string | null): void;
+  /** Walk to the spot in front of the TV and face it. */
+  watchTv(): void;
 }
 
 function shortestAngle(from: number, to: number) {
@@ -52,6 +56,11 @@ export function RoomCanvas() {
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [panel, setPanel] = useState<PanelId | null>(null);
+  const roomRef = useRef<Room | null>(null);
+  const [tvOn, setTvOn] = useState(false);
+  const [tvMenu, setTvMenu] = useState(false);
+  const tvOnRef = useRef(false);
+  tvOnRef.current = tvOn;
   const [showHint, setShowHint] = useState(true);
   const [ready, setReady] = useState(false);
   const [touch, setTouch] = useState(false);
@@ -89,6 +98,7 @@ export function RoomCanvas() {
     renderer.setPixelRatio(1);
 
     const room = buildRoom();
+    roomRef.current = room;
     const crush = createCrushPass();
     const target = new THREE.WebGLRenderTarget(SHORT_SIDE, SHORT_SIDE, {
       minFilter: THREE.NearestFilter,
@@ -96,7 +106,7 @@ export function RoomCanvas() {
     });
     crush.setSource(target.texture);
 
-    const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 30);
+    const camera = new THREE.PerspectiveCamera(62, 1, 0.05, RS.viewDistance);
     camera.rotation.order = 'YXZ';
 
     const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -189,7 +199,7 @@ export function RoomCanvas() {
       if (action.type === 'toggle-light') {
         lit = !lit;
         room.setState(lit, world);
-        setMessage(lit ? 'Lights on.' : 'Lights off.');
+        setMessage(lit ? RS.lightsOnLine : RS.lightsOffLine);
         try {
           window.localStorage.setItem(LIT_KEY, lit ? '1' : '0');
         } catch {
@@ -197,6 +207,16 @@ export function RoomCanvas() {
         }
       } else if (action.type === 'exit') {
         leave();
+      } else if (action.type === 'remote') {
+        setMessage(null);
+        setPanel(null);
+        room.tv.setPower(true);
+        setTvOn(true);
+        setTvMenu(true);
+      } else if (spot.id === 'tv' && tvOnRef.current) {
+        setMessage(null);
+        setPanel(null);
+        setTvMenu(true);
       } else if (spot.panel) {
         setMessage(null);
         setPanel(spot.panel);
@@ -213,6 +233,7 @@ export function RoomCanvas() {
       const dz = spot.center[2] - sz;
       setMessage(null);
       setPanel(null);
+      setTvMenu(false);
       startWalk(
         { x: sx, z: sz },
         {
@@ -232,7 +253,22 @@ export function RoomCanvas() {
       setHoverLabel(id ? (HOTSPOTS.find((h) => h.id === id)?.label ?? null) : null);
     };
 
-    apiRef.current = { visit, highlight };
+    const watchTv = () => {
+      const tv = HOTSPOTS.find((h) => h.id === 'tv');
+      if (!tv) return;
+      const [sx, sz] = tv.stand;
+      const dx = tv.center[0] - sx;
+      const dz = tv.center[2] - sz;
+      startWalk(
+        { x: sx, z: sz },
+        {
+          yaw: Math.atan2(-dx, -dz),
+          pitch: Math.atan2(tv.center[1] - ROOM.eyeHeight, Math.hypot(dx, dz)),
+        },
+      );
+    };
+
+    apiRef.current = { visit, highlight, watchTv };
 
     /* ------------------------------ pointing ----------------------------- */
 
@@ -403,7 +439,7 @@ export function RoomCanvas() {
       // A small bob while walking.
       const moved = Math.hypot(pose.x - beforeX, pose.z - beforeZ);
       if (moved > 0.0005 && !reducedMotion) walkPhase += moved * 5.5;
-      const bob = reducedMotion ? 0 : Math.sin(walkPhase) * 0.022;
+      const bob = reducedMotion ? 0 : Math.sin(walkPhase) * RS.walkBob;
 
       camera.position.set(pose.x, ROOM.eyeHeight + bob, pose.z);
       camera.rotation.set(pose.pitch, pose.yaw, 0);
@@ -433,6 +469,7 @@ export function RoomCanvas() {
     return () => {
       cancelAnimationFrame(raf);
       apiRef.current = null;
+      roomRef.current = null;
       resizeObserver.disconnect();
       canvas.removeEventListener('webglcontextlost', onContextLost);
       canvas.removeEventListener('pointerdown', onPointerDown);
@@ -457,7 +494,17 @@ export function RoomCanvas() {
     return () => window.clearTimeout(id);
   }, [message]);
 
-  const hint = touch ? 'Tap to walk. Drag to look around.' : 'Click to walk. Drag to look around.';
+  const closeTvMenu = useCallback(() => setTvMenu(false), []);
+  const powerOffTv = useCallback(() => {
+    roomRef.current?.tv.setPower(false);
+    setTvMenu(false);
+    setTvOn(false);
+  }, []);
+  const setTvVideo = useCallback((video: HTMLVideoElement | null) => roomRef.current?.tv.setVideo(video), []);
+  const setTvStandby = useCallback((text: string) => roomRef.current?.tv.setStandby(text), []);
+  const watchTv = useCallback(() => apiRef.current?.watchTv(), []);
+
+  const hint = touch ? RS.hintTouch : RS.hintMouse;
   const caption = message ?? hoverLabel ?? (showHint && ready ? hint : '');
 
   return (
@@ -506,6 +553,17 @@ export function RoomCanvas() {
       )}
 
       {panel && <RoomPanel id={panel} onClose={() => setPanel(null)} />}
+
+      {tvOn && (
+        <TvPanel
+          menuOpen={tvMenu}
+          onCloseMenu={closeTvMenu}
+          onPowerOff={powerOffTv}
+          onVideo={setTvVideo}
+          onStandby={setTvStandby}
+          onWatch={watchTv}
+        />
+      )}
 
       <button
         type="button"
