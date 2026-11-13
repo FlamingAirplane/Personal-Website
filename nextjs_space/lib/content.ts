@@ -48,6 +48,10 @@ export interface PortfolioItem {
   projectLink: string;
   /** Optional YouTube link. Its thumbnail becomes the cover when imageUrl is empty, and it is the default projectLink. */
   youtubeUrl?: string;
+  /** A page that can run inside the room's arcade machine (an address that allows embedding). */
+  embedUrl?: string;
+  /** Where the code lives, for a View Code link. */
+  sourceUrl?: string;
   year: number;
   type: 'game' | 'sound';
   /** Comma-separated. */
@@ -98,7 +102,7 @@ export interface SiteContent {
   roomSettings: RoomSettings;
 }
 
-const content = data as SiteContent;
+const content = data as unknown as SiteContent;
 
 /** The 11-character video id from any common YouTube link, or null. */
 export function youtubeId(url?: string): string | null {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { hasProjectPageContent, type PortfolioItem } from '@/lib/content';
 import { useSiteContent } from '@/lib/preview';
@@ -9,7 +9,17 @@ import type { PanelId } from '@/lib/room/room-data';
 
 const LINK = 'text-[#94a348] underline hover:text-[#f3f7e4]';
 
-function Projects({ items, empty }: { items: PortfolioItem[]; empty: string }) {
+function Projects({
+  items,
+  empty,
+  playing,
+  onPlay,
+}: {
+  items: PortfolioItem[];
+  empty: string;
+  playing?: string | null;
+  onPlay?: (id: string | null) => void;
+}) {
   if (items.length === 0) return <p className="text-[#8a9a70]">{empty}</p>;
   return (
     <ul className="space-y-4">
@@ -19,7 +29,7 @@ function Projects({ items, empty }: { items: PortfolioItem[]; empty: string }) {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={item.imageUrl} alt="" className="h-16 w-24 shrink-0 object-cover" />
           )}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="font-bold text-[#f3f7e4]">{item.title}</p>
             <p className="text-xs text-[#8a9a70]">
               {item.category} · {item.year}
@@ -31,12 +41,31 @@ function Projects({ items, empty }: { items: PortfolioItem[]; empty: string }) {
                   Read more
                 </a>
               )}
+              {onPlay && item.embedUrl && (
+                <button type="button" onClick={() => onPlay(playing === item.id ? null : item.id)} className={LINK}>
+                  {playing === item.id ? 'Stop' : 'Play here'}
+                </button>
+              )}
+              {item.sourceUrl && (
+                <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer" className={LINK}>
+                  View code
+                </a>
+              )}
               {item.projectLink && item.projectLink !== '#' && (
                 <a href={item.projectLink} target="_blank" rel="noopener noreferrer" className={LINK}>
                   {item.type === 'sound' ? 'Listen' : 'Play'}
                 </a>
               )}
             </p>
+            {playing === item.id && item.embedUrl && (
+              <iframe
+                src={item.embedUrl}
+                title={item.title}
+                allow="fullscreen; gamepad; autoplay"
+                sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups"
+                className="mt-3 aspect-video w-full border border-[#2e3a1c] bg-black"
+              />
+            )}
           </div>
         </li>
       ))}
@@ -48,6 +77,7 @@ function Projects({ items, empty }: { items: PortfolioItem[]; empty: string }) {
 export function RoomPanel({ id, onClose }: { id: PanelId; onClose: () => void }) {
   const { profile, portfolioItems, workHistory } = useSiteContent();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [playing, setPlaying] = useState<string | null>(null);
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -70,6 +100,8 @@ export function RoomPanel({ id, onClose }: { id: PanelId; onClose: () => void })
       <Projects
         items={portfolioItems.filter((p) => p.type === 'game' && p.projectLink && p.projectLink !== '#')}
         empty="Nothing to play online yet."
+        playing={playing}
+        onPlay={setPlaying}
       />
     );
   } else if (id === 'sound') {
@@ -132,7 +164,7 @@ export function RoomPanel({ id, onClose }: { id: PanelId; onClose: () => void })
     <section
       role="dialog"
       aria-label={title}
-      className="absolute bottom-16 right-3 top-14 z-20 flex w-[min(24rem,calc(100%-1.5rem))] flex-col border border-[#2e3a1c] bg-[#05060a]/90 text-sm backdrop-blur-sm"
+      className={`absolute bottom-16 right-3 top-14 z-20 flex ${playing ? 'w-[min(44rem,calc(100%-1.5rem))]' : 'w-[min(24rem,calc(100%-1.5rem))]'} flex-col border border-[#2e3a1c] bg-[#05060a]/90 text-sm backdrop-blur-sm`}
     >
       <div className="flex items-center justify-between border-b border-[#2e3a1c] px-4 py-3">
         <h2 className="text-xs font-bold uppercase tracking-widest text-[#94a348]">{title}</h2>

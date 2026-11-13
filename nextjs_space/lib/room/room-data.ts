@@ -29,6 +29,8 @@ export type HotspotAction =
   | { type: 'toggle-light' }
   /** Leave the room for the Standard site. */
   | { type: 'exit' }
+  /** The TV remote: turns the TV on and opens its menu. */
+  | { type: 'remote' }
   /** Say a line. Placeholder until the object gets its close-up. */
   | { type: 'inspect'; line: string };
 
@@ -142,13 +144,21 @@ export const HOTSPOTS: Hotspot[] = [
     panel: 'sound',
   },
   {
-    id: 'cinema',
-    label: 'Cinema screen',
-    center: [-3.45, 1.7, 0],
-    size: [0.1, 1.8, 3.4],
+    id: 'tv',
+    label: 'Big TV',
+    center: [-3.42, 1.45, 0],
+    size: [0.16, 1.4, 2.4],
     stand: [-0.6, 0],
-    action: { type: 'inspect', line: 'The screen is blank. It wants headphones first.' },
+    action: { type: 'inspect', line: 'The TV is off. The remote is on the arm of the couch.' },
     world: 'sunset',
+  },
+  {
+    id: 'remote',
+    label: 'TV remote',
+    center: [-1.75, 0.66, 0.77],
+    size: [0.32, 0.2, 0.22],
+    stand: [-1.7, 1.25],
+    action: { type: 'remote' },
   },
 ];
 

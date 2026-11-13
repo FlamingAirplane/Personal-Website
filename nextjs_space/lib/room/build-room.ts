@@ -22,6 +22,14 @@ export interface Room {
   setState(lit: boolean, world: WorldId, instant?: boolean): void;
   /** True while something needs every frame drawn (the walls switching place). */
   busy(): boolean;
+  /** The big TV on the west wall. */
+  tv: {
+    /** Off shows a dark screen. On shows `video`, or the standby picture while there is none. */
+    setPower(on: boolean): void;
+    setVideo(video: HTMLVideoElement | null): void;
+    /** What the standby picture says (for videos playing outside the 3D screen). */
+    setStandby(text: string): void;
+  };
   /** Outline one hotspot (or none). */
   setHighlight(id: string | null): void;
   /** Advance everything that moves. `t` and `dt` are in seconds. */
@@ -37,8 +45,10 @@ export function buildRoom(): Room {
   const disposables: { dispose(): void }[] = [];
 
   // One material per colour, shared by every box of that colour.
+  const swap = (color: string) => RS.colorOverrides[color.toLowerCase()] || color;
   const lambertCache = new Map<string, THREE.MeshLambertMaterial>();
-  const lambert = (color: string) => {
+  const lambert = (original: string) => {
+    const color = swap(original);
     let m = lambertCache.get(color);
     if (!m) {
       m = new THREE.MeshLambertMaterial({ color });
@@ -49,7 +59,8 @@ export function buildRoom(): Room {
   };
   // Unlit and unaffected by fog: for things that make their own light.
   const glowCache = new Map<string, THREE.MeshBasicMaterial>();
-  const glow = (color: string) => {
+  const glow = (original: string) => {
+    const color = swap(original);
     let m = glowCache.get(color);
     if (!m) {
       m = new THREE.MeshBasicMaterial({ color, fog: false });
@@ -313,13 +324,71 @@ export function buildRoom(): Room {
   box(greyDark, 0.03, 0.1, 0.03, TB_X + 0.12, 0.34, TB_Z);
   box(greyDark, 0.27, 0.03, 0.03, TB_X, 0.39, TB_Z); // handle
 
-  /* ----------------------- west: cinema, headphones ---------------------- */
+  /* ------------------------- west: big TV, headphones ------------------------- */
 
   const westX = -HALF_W;
-  box(lambert('#0b0d18'), 0.05, 1.76, 3.36, westX + 0.025, 1.7, 0); // frame
-  const cinemaMat = new THREE.MeshLambertMaterial({ color: '#f3f7e4', emissive: '#a4adb8', emissiveIntensity: 0 });
-  disposables.push(cinemaMat);
-  box(cinemaMat, 0.02, 1.6, 3.2, westX + 0.06, 1.7, 0);
+  const TV_W = RS.tvWidth;
+  const TV_H = TV_W * (9 / 16);
+  const TV_Y = RS.tvHeight;
+  box(lambert('#0b0d18'), 0.03, 0.3, 0.4, westX + 0.015, TV_Y, 0); // wall mount
+  box(bezelMat, 0.06, TV_H + 0.06, TV_W + 0.06, westX + 0.06, TV_Y, 0); // body
+  const tvLed = box(glow('#b8405a'), 0.01, 0.012, 0.03, westX + 0.095, TV_Y - TV_H / 2 - 0.012, TV_W / 2 - 0.05);
+
+  // The standby picture: shown when the TV is on but nothing plays on it.
+  const standbyCanvas = document.createElement('canvas');
+  standbyCanvas.width = 320;
+  standbyCanvas.height = 180;
+  const standbyCtx = standbyCanvas.getContext('2d') as CanvasRenderingContext2D;
+  const standbyTexture = new THREE.CanvasTexture(standbyCanvas);
+  standbyTexture.colorSpace = THREE.SRGBColorSpace;
+  disposables.push(standbyTexture);
+  const paintStandby = (text: string) => {
+    const g = standbyCtx.createLinearGradient(0, 0, 320, 180);
+    g.addColorStop(0, '#1f2350');
+    g.addColorStop(1, '#4a3a8c');
+    standbyCtx.fillStyle = g;
+    standbyCtx.fillRect(0, 0, 320, 180);
+    standbyCtx.fillStyle = '#f3f7e4';
+    standbyCtx.font = 'bold 22px monospace';
+    standbyCtx.textAlign = 'center';
+    standbyCtx.fillText(text, 160, 98);
+    standbyTexture.needsUpdate = true;
+  };
+  paintStandby(RS.tvStandbyText);
+
+  const tvScreenMat = new THREE.MeshBasicMaterial({ color: '#05060a', toneMapped: false });
+  disposables.push(tvScreenMat);
+  const tvScreenGeometry = new THREE.PlaneGeometry(TV_W, TV_H);
+  disposables.push(tvScreenGeometry);
+  const tvScreen = new THREE.Mesh(tvScreenGeometry, tvScreenMat);
+  tvScreen.position.set(westX + 0.092, TV_Y, 0);
+  tvScreen.rotation.y = Math.PI / 2;
+  scene.add(tvScreen);
+  const tvLight = new THREE.PointLight('#8fb0e0', 0, 0, 1.8);
+  tvLight.position.set(westX + 0.9, TV_Y, 0);
+  scene.add(tvLight);
+
+  let tvOn = false;
+  let tvVideo: HTMLVideoElement | null = null;
+  let videoTexture: THREE.VideoTexture | null = null;
+  const showTv = () => {
+    tvLed.visible = !tvOn;
+    tvLight.intensity = tvOn ? RS.tvLight : 0;
+    if (!tvOn) {
+      tvScreenMat.map = null;
+      tvScreenMat.color.set('#05060a');
+    } else {
+      tvScreenMat.map = videoTexture ?? standbyTexture;
+      tvScreenMat.color.set('#ffffff');
+    }
+    tvScreenMat.needsUpdate = true;
+  };
+
+  /* -------------------------------- remote -------------------------------- */
+
+  box(lambert('#1a1e10'), 0.18, 0.025, 0.055, -1.75, 0.643, 0.77); // on the couch arm
+  box(glow('#b8405a'), 0.025, 0.006, 0.025, -1.69, 0.657, 0.77); // power button
+  for (const dx of [-0.02, -0.05, -0.08]) box(lambert('#6b7480'), 0.015, 0.005, 0.03, -1.75 + dx, 0.657, 0.77);
 
   const HP_Z = 2.1;
   const HP_Y = 1.45;
@@ -352,7 +421,7 @@ export function buildRoom(): Room {
   /* -------------------------------- lights ------------------------------- */
 
   // Most of the room's light comes from the wall screens (walls.light).
-  const ambient = new THREE.AmbientLight('#ffffff', RS.ambientLight);
+  const ambient = new THREE.AmbientLight(RS.ambientColor, RS.ambientLight);
   const pcLight = new THREE.PointLight('#3a8fa0', 0, 0, 1.8);
   pcLight.position.set(eastX - 0.9, 1.25, 0);
   const arcadeLight = new THREE.PointLight('#5a8fc0', 0, 0, 1.8);
@@ -361,7 +430,7 @@ export function buildRoom(): Room {
   doorLight.position.set(DOOR_X, 0.12, southZ - 0.35);
   scene.add(ambient, pcLight, arcadeLight, doorLight);
 
-  const fog = new THREE.FogExp2('#0b0d24', 0);
+  const fog = new THREE.FogExp2(RS.fogColor, 0);
   scene.fog = fog;
   scene.background = new THREE.Color('#05060a');
 
@@ -395,11 +464,10 @@ export function buildRoom(): Room {
 
   const setState = (lit: boolean, world: WorldId, instant = false) => {
     walls.show(lit ? world : RS.darkWorld, instant);
-    pcLight.intensity = lit ? 0.3 : 1.4;
-    arcadeLight.intensity = lit ? 0.3 : 1.2;
-    doorLight.intensity = lit ? 0 : 0.5;
+    pcLight.intensity = lit ? RS.computerLightOn : RS.computerLightOff;
+    arcadeLight.intensity = lit ? RS.arcadeLightOn : RS.arcadeLightOff;
+    doorLight.intensity = lit ? 0 : RS.doorLightOff;
     fog.density = lit ? 0 : RS.darkFog;
-    cinemaMat.emissiveIntensity = lit ? 0 : 0.12;
     switchNub.position.y = SWITCH_Y + (lit ? 0.03 : -0.03);
     switchLed.visible = !lit;
     doorGlow.visible = !lit;
@@ -407,6 +475,7 @@ export function buildRoom(): Room {
     props.setLit(lit);
   };
   setState(false, RS.darkWorld, true);
+  showTv();
 
   let lastScreens = -1;
 
@@ -415,7 +484,26 @@ export function buildRoom(): Room {
     floor,
     hitVolumes,
     setState,
-    busy: () => walls.busy(),
+    busy: () => walls.busy() || (tvOn && tvVideo !== null && !tvVideo.paused),
+    tv: {
+      setPower(on) {
+        tvOn = on;
+        showTv();
+      },
+      setVideo(video) {
+        videoTexture?.dispose();
+        videoTexture = null;
+        tvVideo = video;
+        if (video) {
+          videoTexture = new THREE.VideoTexture(video);
+          videoTexture.colorSpace = THREE.SRGBColorSpace;
+        }
+        showTv();
+      },
+      setStandby(text) {
+        paintStandby(text);
+      },
+    },
     setHighlight(id) {
       outlines.forEach((outline, key) => {
         outline.visible = key === id;
@@ -433,6 +521,7 @@ export function buildRoom(): Room {
       }
     },
     dispose() {
+      videoTexture?.dispose();
       disposables.forEach((d) => d.dispose());
       walls.dispose();
     },
